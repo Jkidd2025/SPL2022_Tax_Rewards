@@ -40,8 +40,15 @@
     "rewards": {
         "minimumTokenHoldingRequirement": 50000
     },
-    "swapConfig": {
-        "poolAddress": "MAINNET_WBTC_POOL_ADDRESS",
-        "minimumAmountOut": 0
+    "raydium": {
+        "poolId": "MAINNET_RAYDIUM_POOL_ID",
+        "ammAuthority": "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1",
+        "ammOpenOrders": "MAINNET_AMM_OPEN_ORDERS",
+        "poolTempLp": "MAINNET_POOL_TEMP_LP",
+        "marketId": "MAINNET_MARKET_ID",
+        "marketProgramId": "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
+        "swapProgramId": "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8",
+        "slippage": 1.0,
+        "minPoolLiquidity": 1000
     }
 } 

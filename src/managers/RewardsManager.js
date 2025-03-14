@@ -9,6 +9,7 @@ const {
     createAssociatedTokenAccountInstruction,
     createTransferInstruction,
 } = require('@solana/spl-token');
+const SwapManager = require('./SwapManager');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
@@ -31,6 +32,7 @@ class RewardsManager {
         
         this.config = config;
         this.programId = TOKEN_PROGRAM_ID;
+        this.swapManager = new SwapManager(connection, config);
 
         // Load keypairs
         this.loadKeypairs();
@@ -103,23 +105,39 @@ class RewardsManager {
     }
 
     /**
-     * Convert collected taxes to WBTC using a DEX
+     * Convert collected taxes to WBTC
      * @param {number} amount - Amount of tokens to convert
      * @returns {Promise<number>} Amount of WBTC received
      */
     async convertToWBTC(amount) {
         try {
-            // Note: This is a placeholder for DEX integration
-            // You'll need to implement the actual swap logic using your preferred DEX
-            console.log(`Converting ${amount} tokens to WBTC...`);
-            
-            // TODO: Implement actual DEX swap logic here
-            // This would involve:
-            // 1. Creating a swap instruction using your chosen DEX's SDK
-            // 2. Executing the swap transaction
-            // 3. Confirming the swap and returning the amount of WBTC received
+            // Check pool liquidity first
+            const hasLiquidity = await this.swapManager.checkPoolLiquidity(amount);
+            if (!hasLiquidity) {
+                throw new Error('Insufficient pool liquidity for swap');
+            }
 
-            throw new Error('DEX integration not implemented');
+            // Get swap estimate
+            const estimatedWBTC = await this.swapManager.getSwapEstimate(amount);
+            console.log(`Estimated WBTC return: ${estimatedWBTC}`);
+
+            // Perform the swap
+            const signature = await this.swapManager.swapTokensForWBTC(
+                this.rewardsKeypair.publicKey.toString(),
+                amount
+            );
+
+            console.log('Swap completed successfully');
+            console.log('Transaction signature:', signature);
+
+            // Get actual WBTC amount received
+            const wbtcAccount = await getAssociatedTokenAddress(
+                new PublicKey(this.config.wbtc.mint),
+                this.rewardsKeypair.publicKey
+            );
+            const balance = await this.connection.getTokenAccountBalance(wbtcAccount);
+            
+            return balance.value.uiAmount;
         } catch (error) {
             console.error('Error converting to WBTC:', error.message);
             throw error;
