@@ -22,7 +22,7 @@ const {
 const { 
     PROGRAM_ID: METADATA_PROGRAM_ID,
     createCreateMetadataAccountV3Instruction,
-    createUpdateMetadataAccountV3Instruction,
+    createUpdateMetadataAccountV2Instruction,
     DataV2,
 } = require('@metaplex-foundation/mpl-token-metadata');
 const fs = require('fs');
@@ -34,11 +34,11 @@ class TokenManager {
         this.connection = connection;
         
         // Load and validate config
-        if (!fs.existsSync('./config.json')) {
-            throw new Error('config.json not found');
+        if (!fs.existsSync('./config.mainnet.json')) {
+            throw new Error('config.mainnet.json not found');
         }
         
-        const config = JSON.parse(fs.readFileSync('./config.json', 'utf-8'));
+        const config = JSON.parse(fs.readFileSync('./config.mainnet.json', 'utf-8'));
         
         // Validate config structure
         if (!config.network?.endpoint) {
@@ -61,7 +61,7 @@ class TokenManager {
 
     loadKeypairs() {
         try {
-            const walletsDir = './wallets';
+            const walletsDir = './wallets/mainnet';
             
             // Validate wallets directory exists
             if (!fs.existsSync(walletsDir)) {
@@ -195,13 +195,13 @@ class TokenManager {
             const metadataPda = await this.findMetadataPda(mintPubkey);
 
             // Create update metadata instruction
-            const updateMetadataInstruction = createUpdateMetadataAccountV3Instruction(
+            const updateMetadataInstruction = createUpdateMetadataAccountV2Instruction(
                 {
                     metadata: metadataPda,
                     updateAuthority: tokenAuthorityKeypair.publicKey,
                 },
                 {
-                    updateMetadataAccountArgsV3: {
+                    updateMetadataAccountArgsV2: {
                         data: {
                             name: metadata.name,
                             symbol: metadata.symbol,
@@ -212,6 +212,8 @@ class TokenManager {
                             uses: null,
                         },
                         updateAuthority: tokenAuthorityKeypair.publicKey,
+                        primarySaleHappened: null,
+                        isMutable: true,
                     },
                 }
             );
@@ -272,7 +274,7 @@ class TokenManager {
                 }),
                 createInitializeMintInstruction(
                     mintKeypair.publicKey,
-                    6, // 6 decimals
+                    this.config.token.decimals, // Use decimals from config
                     mintAuthorityPubkey,
                     this.tokenAuthorityKeypair.publicKey,
                     TOKEN_PROGRAM_ID
@@ -303,10 +305,6 @@ class TokenManager {
             console.log('Mint address:', mintKeypair.publicKey.toBase58());
             console.log('Signature:', signature);
 
-            // Save mint address to config
-            this.config.tokenMint = mintKeypair.publicKey.toBase58();
-            fs.writeFileSync('./config.json', JSON.stringify(this.config, null, 2));
-
             return mintKeypair.publicKey;
         } catch (error) {
             console.error('Error creating token mint:', error.message);
@@ -315,14 +313,14 @@ class TokenManager {
     }
 
     // Create token account
-    async createTokenAccount(ownerPubkey) {
+    async createTokenAccount(ownerPubkey, mintPubkey) {
         try {
-            const mintPubkey = new PublicKey(this.config.tokenMint);
             const owner = new PublicKey(ownerPubkey);
+            const mint = new PublicKey(mintPubkey);
 
             // Get associated token account address
             const associatedTokenAddress = await getAssociatedTokenAddress(
-                mintPubkey,
+                mint,
                 owner
             );
 
@@ -335,7 +333,7 @@ class TokenManager {
                     this.tokenAuthorityKeypair.publicKey,
                     associatedTokenAddress,
                     owner,
-                    mintPubkey,
+                    mint,
                     TOKEN_PROGRAM_ID
                 )
             );
@@ -372,18 +370,21 @@ class TokenManager {
     }
 
     // Mint tokens
-    async mintTokens(amount, destinationPubkey) {
+    async mintTo(destinationPubkey, amount, mintPubkey) {
         try {
-            const mintPubkey = new PublicKey(this.config.tokenMint);
             const destination = new PublicKey(destinationPubkey);
+            const mint = new PublicKey(mintPubkey);
+
+            // Convert amount to raw units using config decimals
+            const rawAmount = amount * Math.pow(10, this.config.token.decimals);
 
             // Create transaction
             const transaction = new Transaction().add(
                 createMintToInstruction(
-                    mintPubkey,
+                    mint,
                     destination,
                     this.mintAuthorityKeypair.publicKey,
-                    amount * Math.pow(10, 6), // Convert to 6 decimals
+                    rawAmount,
                     [],
                     TOKEN_PROGRAM_ID
                 )
@@ -395,7 +396,7 @@ class TokenManager {
             transaction.feePayer = this.mintAuthorityKeypair.publicKey;
 
             // Sign and send transaction
-            console.log('Minting tokens...');
+            console.log(`Minting ${amount} tokens...`);
             const signature = await this.connection.sendTransaction(
                 transaction,
                 [this.mintAuthorityKeypair]

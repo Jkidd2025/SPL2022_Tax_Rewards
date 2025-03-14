@@ -41,18 +41,18 @@ async function retryWithBackoff(operation, maxRetries = 3, initialDelay = 2000) 
 async function main() {
     try {
         // Load and validate configuration
-        if (!fs.existsSync('./config.json')) {
-            throw new Error('config.json not found');
+        if (!fs.existsSync('./config.mainnet.json')) {
+            throw new Error('config.mainnet.json not found');
         }
         
-        const config = JSON.parse(fs.readFileSync('./config.json', 'utf-8'));
+        const config = JSON.parse(fs.readFileSync('./config.mainnet.json', 'utf-8'));
         
         // Validate config structure
         if (!config.network?.endpoint || !config.wallets?.treasury?.publicKey) {
             throw new Error('Invalid config structure');
         }
         
-        // Connect to devnet with increased timeouts
+        // Connect to mainnet with increased timeouts
         const connection = new Connection(config.network.endpoint, {
             commitment: 'confirmed',
             confirmTransactionInitialTimeout: 120000, // 2 minutes
@@ -63,7 +63,7 @@ async function main() {
         // Initialize token manager
         const tokenManager = new TokenManager(connection);
 
-        console.log('Creating Stealth Mode Startup ($SMS) token...');
+        console.log('Creating BPAY token...');
 
         // 1. Create token mint with retry
         console.log('\nStep 1: Creating token mint...');
@@ -75,9 +75,9 @@ async function main() {
         // 2. Create metadata
         console.log('\nStep 2: Creating token metadata...');
         const metadata = {
-            name: "Stealth Mode Startup",
-            symbol: "SMS",
-            uri: "https://raw.githubusercontent.com/Jkidd2025/spl-token-2022-v2/main/assets/metadata.json"
+            name: config.token.name,
+            symbol: config.token.symbol,
+            uri: config.token.metadataUri
         };
 
         // Validate metadata URL before proceeding
@@ -93,31 +93,30 @@ async function main() {
         console.log('\nStep 3: Creating Treasury token account...');
         const treasuryPubkey = config.wallets.treasury.publicKey;
         const treasuryATA = await retryWithBackoff(async () => {
-            return await tokenManager.createTokenAccount(treasuryPubkey);
+            return await tokenManager.createTokenAccount(treasuryPubkey, mintPubkey);
         });
         console.log('Treasury token account created:', treasuryATA.toBase58());
 
         // 4. Mint initial supply to Treasury with retry
         console.log('\nStep 4: Minting initial supply...');
-        const initialSupply = 1_000_000_000; // 1 billion
+        const initialSupply = 1_000_000_000; // 1 billion tokens
         await retryWithBackoff(async () => {
-            return await tokenManager.mintTokens(initialSupply, treasuryATA);
+            return await tokenManager.mintTo(treasuryATA, initialSupply, mintPubkey);
         });
+        console.log('Initial supply minted successfully');
 
-        // 5. Get and display token balance with retry
-        console.log('\nStep 5: Verifying token balance...');
-        const balance = await retryWithBackoff(async () => {
-            return await tokenManager.getTokenBalance(treasuryATA);
-        });
-        console.log('Treasury token balance:', balance.uiAmount, metadata.symbol);
+        // Update config with new mint address
+        config.token.mint = mintPubkey.toBase58();
+        fs.writeFileSync('./config.mainnet.json', JSON.stringify(config, null, 4));
+        console.log('\nConfiguration updated with new mint address');
 
         console.log('\nToken creation completed successfully!');
-        console.log('Token Mint:', mintPubkey.toBase58());
-        console.log('Metadata Account:', metadataPda.toBase58());
+        console.log('Token Mint Address:', mintPubkey.toBase58());
         console.log('Treasury Token Account:', treasuryATA.toBase58());
-        
+        console.log('Metadata Account:', metadataPda.toBase58());
+
     } catch (error) {
-        console.error('Error creating token:', error.message);
+        console.error('\nError creating token:', error);
         process.exit(1);
     }
 }

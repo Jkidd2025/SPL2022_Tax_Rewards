@@ -8,28 +8,28 @@
     },
     "wallets": {
         "tokenAuthority": {
-            "publicKey": "Q8oMuUDoUuXitpejLaeKDpobySPa5taJx74CFP5xgbU"
+            "publicKey": "HR72FjQpsw1aGCbz1pp8kNVBSsZNycEtvmEHNNrADeNu"
         },
         "mintAuthority": {
-            "publicKey": "DhbXhxQCqedvoy3e4BfuXHooo2cHRFmyqLqYqK1jC7Hb"
+            "publicKey": "AvkeRVECrjR1S1JPzz1htVooSJfAdcni3GUE4TXZfpP3"
         },
         "treasury": {
-            "publicKey": "2DaqCRMC5nW7CEyewjykaC8hax8UepQQGNhMsuHo6D9N"
+            "publicKey": "DPnKM32e59P1ErpveErNxZcgZ1yS71uRdz6488k4sUMh"
         },
         "taxCollector": {
-            "publicKey": "Do1HCJTdpfb3LPAkZp78HdKowQVCVN7eRwwDNgrUooFW"
+            "publicKey": "CZrgXEkyHC59obJWAhbAvMFzvuAuuve4a4Va1eCR1ewF"
         },
         "rewardsAccount": {
-            "publicKey": "DVyvGopDxCD2mFUKLAfP76PPgmBzGK9Waq8Ui4vZJX2"
+            "publicKey": "GYHhTGMkb7v2LoBcMqeAzfxCYs5hYhXsb2ufn6gd9mSu"
         }
     },
     "token": {
-        "mint": "",
-        "decimals": 9,
+        "mint": "DVSSBXY2Kvpt7nmPRfbY9JNdgMnm8y6TvkkwoZiVQUiv",
+        "decimals": 6,
         "name": "BPay",
         "symbol": "BPAY",
         "description": "BPAY is a WBTC payment system that allows users to receive reward payments in WBTC",
-        "metadataUri": ""
+        "metadataUri": "https://raw.githubusercontent.com/Jkidd2025/spl-token-2022-v2/main/assets/metadata.json"
     },
     "wbtc": {
         "mint": "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh",
@@ -37,11 +37,17 @@
         "minimumDistributionThreshold": 0.00001
     },
     "raydium": {
-        "poolId": "",
-        "marketId": "",
+        "poolId": "ZJRz5zEdav2dtUFzkib8oSzajy4RKQMEkDe9ToBkG2u",
+        "marketId": "ZJRz5zEdav2dtUFzkib8oSzajy4RKQMEkDe9ToBkG2u",
         "marketProgramId": "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8",
         "minimumLiquidity": 1000,
-        "slippage": 1
+        "slippage": 1,
+        "lpMint": "6qDnrmvGhXVajmaxYmx6CVqUTe6MTtNW4JfzRJgUZXv4",
+        "ammId": "DbfQZckLGtWbgKNbijNda5VdNjzeQipVJD7WC6sMJMRS",
+        "ammAuthority": "FDTfCpAtHfgJAxZum33wy94ytU23h4jrcHBZetnKRFzo",
+        "baseTokenAccount": "DipcsdyqHnzUKHujGLqmyJz3Kz5cNRa4JZWqE4sSHzAv",
+        "quoteTokenAccount": "9dtst6zrE7BYWLQPnR22o5d8ubxRUKX6ak7iMPPTBicb",
+        "lpTokenAccount": "76gwAj2uTsAgW2vXmaojxGxqtN5NXbNMBFZBMGBw7oEh"
     },
     "rewards": {
         "minimumTokenHoldingRequirement": 50000
@@ -55,4 +61,4 @@
             "minHolders": 10
         }
     }
-} 
+}
