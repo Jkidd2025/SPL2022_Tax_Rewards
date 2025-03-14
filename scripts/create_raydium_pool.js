@@ -1,24 +1,23 @@
-const { Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction, SYSVAR_RENT_PUBKEY, LAMPORTS_PER_SOL } = require('@solana/web3.js');
+const { Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction, SYSVAR_RENT_PUBKEY, LAMPORTS_PER_SOL, ComputeBudgetProgram } = require('@solana/web3.js');
 const { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, createInitializeAccountInstruction, createInitializeMintInstruction, createCloseAccountInstruction } = require('@solana/spl-token');
 const { struct, u64, u8, i32, u16 } = require('@project-serum/borsh');
 const BN = require('bn.js');
 const fs = require('fs');
 const path = require('path');
-const { ComputeBudgetProgram } = require('@solana/web3.js');
 require('dotenv').config();
 
-// Raydium CLMM Program IDs for different networks
+// Raydium CLMM Program IDs (per https://docs.raydium.io/raydium/protocol/developers/addresses)
 const RAYDIUM_CLMM_PROGRAM_IDS = {
     mainnet: new PublicKey('CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK'),
-    devnet: new PublicKey('CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK'), // Same as mainnet for now
-    testnet: new PublicKey('CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK')  // Same as mainnet for now
+    devnet: null,  // Unknown; update if provided by Raydium
+    testnet: null  // Unknown; update if provided by Raydium
 };
 
-// AMM Config IDs for different networks
+// AMM Config IDs
 const AMM_CONFIG_IDS = {
     mainnet: new PublicKey('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1'),
-    devnet: new PublicKey('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1'), // Same as mainnet for now
-    testnet: new PublicKey('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1')  // Same as mainnet for now
+    devnet: null,  // Unknown; update if provided by Raydium
+    testnet: null  // Unknown; update if provided by Raydium
 };
 
 // Validation constants
@@ -27,18 +26,22 @@ const MAX_TICK_SPACING = 1000;
 const MIN_TICK = -887220;
 const MAX_TICK = 887220;
 
-// Layout for CLMM CreatePool instruction data
+// Define layout outside (it's constant)
 const CREATE_POOL_IX_DATA_LAYOUT = struct([
-    u8('instruction'),  // Anchor instruction discriminator
-    i32('tick'),       // Initial tick (price)
-    u16('tickSpacing') // Tick spacing
+    i32('tick'),         // Initial tick (price)
+    u16('tickSpacing')   // Tick spacing
+]);
+
+// Anchor discriminator for create_pool
+const CREATE_POOL_DISCRIMINATOR = Buffer.from([
+    0x0b, 0x39, 0x38, 0x16, 0x5b, 0x83, 0x19, 0x3c
 ]);
 
 const MAX_RETRIES = 5;
 const CONFIRMATION_TIMEOUT = 60;
-const INITIAL_BACKOFF_MS = 2000;
-const MAX_BACKOFF_MS = 32000;
-const TRANSACTION_SPACING_MS = 5000;
+const INITIAL_BACKOFF_MS = 5000;
+const MAX_BACKOFF_MS = 60000;
+const TRANSACTION_SPACING_MS = 10000;
 const MAX_TRANSACTION_SIZE = 1232;
 
 async function sleep(ms) {
@@ -69,7 +72,25 @@ async function sendAndConfirmTransactionWithRetry(connection, transaction, signe
     
     for (let i = 0; i < MAX_RETRIES; i++) {
         try {
-            const { blockhash, lastValidBlockHeight } = await getRecentBlockhashWithRetry(connection);
+            console.log(`\n${label} attempt ${i + 1}/${MAX_RETRIES} (backoff: ${backoff/1000}s)...`);
+            
+            // Get blockhash with retry
+            let blockhash, lastValidBlockHeight;
+            for (let j = 0; j < 3; j++) {
+                try {
+                    ({ blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('finalized'));
+                    break;
+                } catch (error) {
+                    if (error.message.includes('429 Too Many Requests')) {
+                        console.log(`Rate limited getting blockhash, waiting ${backoff/1000} seconds...`);
+                        await sleep(backoff);
+                        backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
+                        continue;
+                    }
+                    throw error;
+                }
+            }
+
             transaction.recentBlockhash = blockhash;
             transaction.feePayer = signers[0].publicKey;
             
@@ -80,7 +101,6 @@ async function sendAndConfirmTransactionWithRetry(connection, transaction, signe
                 ];
             }
 
-            console.log(`\nSending ${label} (attempt ${i + 1}/${MAX_RETRIES})...`);
             const signature = await connection.sendTransaction(transaction, signers, {
                 skipPreflight: false,
                 preflightCommitment: 'confirmed',
@@ -98,11 +118,16 @@ async function sendAndConfirmTransactionWithRetry(connection, transaction, signe
             console.error('Error message:', error.message);
             if (error.logs) console.error('Transaction Logs:', error.logs);
             lastError = error;
+            
             if (error.message.includes('429 Too Many Requests')) {
                 console.log(`Rate limited, waiting ${backoff/1000} seconds...`);
                 await sleep(backoff);
                 backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
+            } else if (error.message.includes('blockhash not found') || error.message.includes('Block height exceeded')) {
+                console.log('Blockhash expired, retrying immediately with new blockhash...');
+                continue;
             } else {
+                console.log(`Unknown error, waiting ${2000/1000} seconds...`);
                 await sleep(2000);
             }
         }
@@ -187,45 +212,49 @@ async function createRaydiumClmmPool() {
         );
 
         // Connect with fallback
+        let rpcEndpoint = process.env.SOLANA_RPC_ENDPOINT;
         try {
-            connection = new Connection(process.env.SOLANA_RPC_ENDPOINT, {
+            console.log('Attempting to connect to primary RPC:', rpcEndpoint);
+            connection = new Connection(rpcEndpoint, {
                 commitment: 'confirmed',
                 confirmTransactionInitialTimeout: CONFIRMATION_TIMEOUT * 1000
             });
-            await connection.getSlot();
+            const slot = await connection.getSlot();
+            console.log('Connected to Solana network at slot:', slot);
         } catch (error) {
-            console.log('Primary RPC failed, trying backup...');
-            connection = new Connection(process.env.SOLANA_RPC_ENDPOINT_BACKUP, {
+            console.log('Primary RPC failed:', error.message);
+            rpcEndpoint = process.env.SOLANA_RPC_ENDPOINT_BACKUP;
+            console.log('Trying backup RPC:', rpcEndpoint);
+            connection = new Connection(rpcEndpoint, {
                 commitment: 'confirmed',
                 confirmTransactionInitialTimeout: CONFIRMATION_TIMEOUT * 1000
             });
-            await connection.getSlot();
+            const slot = await connection.getSlot();
+            console.log('Connected to Solana network at slot:', slot);
         }
 
         // Determine network
         const version = await connection.getVersion();
-        const network = await connection.getClusterNodes();
-        const isMainnet = network.some(node => node.rpc && node.rpc.includes('mainnet'));
-        const isDevnet = network.some(node => node.rpc && node.rpc.includes('devnet'));
-        const isTestnet = network.some(node => node.rpc && node.rpc.includes('testnet'));
+        const isMainnet = rpcEndpoint.includes('mainnet') || rpcEndpoint === 'https://api.mainnet-beta.solana.com';
+        const isDevnet = rpcEndpoint.includes('devnet');
+        const isTestnet = rpcEndpoint.includes('testnet');
+        const networkType = isMainnet ? 'mainnet' : isDevnet ? 'devnet' : isTestnet ? 'testnet' : 'unknown';
 
         console.log('\nNetwork Information:');
         console.log('Version:', version);
-        console.log('Network:', isMainnet ? 'Mainnet' : isDevnet ? 'Devnet' : isTestnet ? 'Testnet' : 'Unknown');
+        console.log('Network:', networkType);
         console.log('RPC Endpoint:', connection.rpcEndpoint);
 
-        // Set program IDs based on network
-        const RAYDIUM_CLMM_PROGRAM_ID = isMainnet ? RAYDIUM_CLMM_PROGRAM_IDS.mainnet :
-                                      isDevnet ? RAYDIUM_CLMM_PROGRAM_IDS.devnet :
-                                      RAYDIUM_CLMM_PROGRAM_IDS.testnet;
+        // Only allow mainnet for now since we don't have devnet/testnet program IDs
+        if (networkType !== 'mainnet') {
+            throw new Error('This script currently only supports mainnet. Devnet/testnet program IDs are not yet available.');
+        }
 
-        const AMM_CONFIG_ID = isMainnet ? AMM_CONFIG_IDS.mainnet :
-                            isDevnet ? AMM_CONFIG_IDS.devnet :
-                            AMM_CONFIG_IDS.testnet;
+        const RAYDIUM_CLMM_PROGRAM_ID = RAYDIUM_CLMM_PROGRAM_IDS[networkType];
+        const AMM_CONFIG_ID = AMM_CONFIG_IDS[networkType];
 
-        console.log('\nUsing Program IDs:');
-        console.log('Raydium CLMM Program:', RAYDIUM_CLMM_PROGRAM_ID.toString());
-        console.log('AMM Config:', AMM_CONFIG_ID.toString());
+        if (!RAYDIUM_CLMM_PROGRAM_ID) throw new Error(`Raydium CLMM program ID not defined for ${networkType}`);
+        if (!AMM_CONFIG_ID) throw new Error(`AMM Config ID not defined for ${networkType}`);
 
         // Validate program IDs
         console.log('\nValidating program IDs...');
@@ -252,7 +281,7 @@ async function createRaydiumClmmPool() {
         const lpMintKeypair = Keypair.generate();
         const baseTokenAccountKeypair = Keypair.generate();
         const quoteTokenAccountKeypair = Keypair.generate();
-        const baseMint = new PublicKey('DVSSBXY2Kvpt7nmPRfbY9JNdgMnm8y6TvkkwoZiVQUiv'); // Token-2022 assumed
+        const baseMint = new PublicKey('DVSSBXY2Kvpt7nmPRfbY9JNdgMnm8y6TvkkwoZiVQUiv'); // Regular SPL token
         const quoteMint = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'); // USDC
 
         accountsToCleanup.push(poolKeypair, lpMintKeypair, baseTokenAccountKeypair, quoteTokenAccountKeypair);
@@ -347,16 +376,20 @@ async function createRaydiumClmmPool() {
             throw new Error('Invalid tick or tickSpacing');
         }
 
-        // CreatePool instruction data
-        const createPoolData = Buffer.alloc(CREATE_POOL_IX_DATA_LAYOUT.span);
-        CREATE_POOL_IX_DATA_LAYOUT.encode({
-            instruction: 0,    // create_pool instruction index
-            tick: initialTick,
-            tickSpacing,
-        }, createPoolData);
+        // Create pool instruction data
+        const instructionData = Buffer.alloc(CREATE_POOL_IX_DATA_LAYOUT.span + 8); // +8 for discriminator
+        CREATE_POOL_DISCRIMINATOR.copy(instructionData, 0);
+        CREATE_POOL_IX_DATA_LAYOUT.encode(
+            {
+                tick: initialTick,
+                tickSpacing: tickSpacing,
+            },
+            instructionData,
+            8  // Offset after discriminator
+        );
 
-        // CreatePool instruction
-        const createPoolIx = new TransactionInstruction({
+        // Create the instruction
+        const createPoolInstruction = new TransactionInstruction({
             programId: RAYDIUM_CLMM_PROGRAM_ID,
             keys: [
                 { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },           // 0: Standard Token Program
@@ -373,7 +406,7 @@ async function createRaydiumClmmPool() {
                 { pubkey: quoteTokenAccountKeypair.publicKey, isSigner: false, isWritable: true }, // 11: Quote vault
                 { pubkey: AMM_CONFIG_ID, isSigner: false, isWritable: false },             // 12: AMM config
             ],
-            data: createPoolData
+            data: instructionData,
         });
 
         // Debug logging before Transaction 1
@@ -415,10 +448,22 @@ async function createRaydiumClmmPool() {
         }
 
         // Transaction 2: Create and initialize pool
+        console.log('\nPre-Transaction 2 Debug Info:');
+        console.log('Program ID:', RAYDIUM_CLMM_PROGRAM_ID.toString());
+        console.log('Instruction Data:', {
+            tick: initialTick,
+            tickSpacing: tickSpacing,
+        });
+        console.log('Data Buffer:', instructionData.toString('hex'));
+        console.log('\nAccount Keys:');
+        createPoolInstruction.keys.forEach((key, index) => {
+            console.log(`${index}: ${key.pubkey.toString()} (signer: ${key.isSigner}, writable: ${key.isWritable})`);
+        });
+
         console.log('\nSending Transaction 2: Creating and initializing pool...');
         const setupTx2 = new Transaction()
             .add(createPoolAccountIx)
-            .add(createPoolIx);
+            .add(createPoolInstruction);
         await checkTransactionSize(setupTx2, connection, authority.publicKey);
         await sendAndConfirmTransactionWithRetry(
             connection,
