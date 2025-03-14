@@ -1,9 +1,9 @@
 {
-    "name": "BPay",
+    "name": "BPAY",
     "symbol": "BPAY",
     "description": "BPAY is a WBTC payment system that allows users to receive reward payments in WBTC. The system implements automatic rewards distribution through a 5% transaction tax mechanism.",
-    "image": "https://raw.githubusercontent.com/Jkidd2025/SPL2022_Tax_Rewards/main/assets/logo.png",
-    "external_url": "https://www.bpaycrypto.com",
+    "image": "https://raw.githubusercontent.com/Jkidd2025/spl-token-2022-v2/main/assets/logo.png",
+    "external_url": "https://github.com/Jkidd2025/spl-token-2022-v2",
     "attributes": [
         {
             "trait_type": "Token Type",
@@ -16,12 +16,16 @@
         {
             "trait_type": "Reward Type",
             "value": "WBTC"
+        },
+        {
+            "trait_type": "Decimals",
+            "value": 6
         }
     ],
     "properties": {
         "files": [
             {
-                "uri": "https://raw.githubusercontent.com/Jkidd2025/SPL2022_Tax_Rewards/main/assets/logo.png",
+                "uri": "https://raw.githubusercontent.com/Jkidd2025/spl-token-2022-v2/main/assets/logo.png",
                 "type": "image/png"
             }
         ],
