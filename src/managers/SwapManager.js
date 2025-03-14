@@ -1,13 +1,17 @@
-const { Connection, PublicKey, Transaction } = require('@solana/web3.js');
+const { Connection, PublicKey, Transaction, sendAndConfirmTransaction } = require('@solana/web3.js');
 const { Token, TOKEN_PROGRAM_ID } = require('@solana/spl-token');
 const { Liquidity, Market, Percent, Token: RadToken } = require('@raydium-io/raydium-sdk');
 const Decimal = require('decimal.js');
 const fs = require('fs');
+const { log } = require('../utils/logger');
 
 class SwapManager {
     constructor(connection, config) {
         this.connection = connection;
         this.config = config;
+        this.maxRetries = 3;
+        this.retryDelay = 1000; // 1 second
+        this.maxTransactionSize = 1232; // Maximum transaction size in bytes
         
         if (!config.raydium?.poolId || !config.wbtc?.mint) {
             throw new Error('Missing required Raydium or WBTC configuration');
@@ -20,22 +24,24 @@ class SwapManager {
      */
     async initializePool() {
         try {
-            const poolId = new PublicKey(this.config.raydium.poolId);
+            const market = await Market.load(
+                this.connection,
+                new PublicKey(this.config.raydium.marketId),
+                {},
+                new PublicKey(this.config.raydium.marketProgramId)
+            );
             
-            // Get pool info
-            const poolInfo = await Liquidity.fetchInfo({
-                connection: this.connection,
-                poolId
+            this.market = market;
+            log.info('Pool initialized successfully', {
+                marketId: this.config.raydium.marketId,
+                poolId: this.config.raydium.poolId
             });
-
-            if (!poolInfo) {
-                throw new Error('Failed to fetch pool information');
-            }
-
-            this.poolInfo = poolInfo;
-            return poolInfo;
+            
+            return true;
         } catch (error) {
-            console.error('Error initializing Raydium pool:', error);
+            log.error('Failed to initialize pool', error, {
+                marketId: this.config.raydium.marketId
+            });
             throw error;
         }
     }
@@ -47,22 +53,26 @@ class SwapManager {
      */
     async getSwapEstimate(amount) {
         try {
-            if (!this.poolInfo) {
-                await this.initializePool();
-            }
-
-            const amountIn = new Decimal(amount).mul(10 ** this.config.token.decimals);
+            const estimate = await this.market.getQuote(amount);
+            const minAmountOut = new Decimal(estimate.amountOut)
+                .mul(1 - this.config.raydium.slippage)
+                .floor()
+                .toString();
             
-            const { amountOut } = await Liquidity.computeAmountOut({
-                poolInfo: this.poolInfo,
-                amountIn: amountIn.toString(),
-                currencyIn: this.config.tokenMint,
-                slippage: new Percent(1, 100) // 1% slippage
+            log.info('Swap estimate calculated', {
+                inputAmount: amount,
+                estimatedOutput: estimate.amountOut,
+                minAmountOut,
+                slippage: this.config.raydium.slippage
             });
-
-            return new Decimal(amountOut).div(10 ** this.config.wbtc.decimals).toNumber();
+            
+            return {
+                estimatedAmount: estimate.amountOut,
+                minAmountOut,
+                price: estimate.price
+            };
         } catch (error) {
-            console.error('Error getting swap estimate:', error);
+            log.error('Failed to get swap estimate', error, { amount });
             throw error;
         }
     }
@@ -74,53 +84,67 @@ class SwapManager {
      * @returns {Promise<string>} Transaction signature
      */
     async swapTokensForWBTC(ownerAddress, amount) {
-        try {
-            if (!this.poolInfo) {
-                await this.initializePool();
+        let attempt = 0;
+        while (attempt < this.maxRetries) {
+            try {
+                // Check pool liquidity first
+                await this.checkPoolLiquidity(amount);
+                
+                // Get swap estimate
+                const { minAmountOut } = await this.getSwapEstimate(amount);
+                
+                // Create swap instruction
+                const swapInstruction = await this.market.makeSwapInstruction({
+                    owner: new PublicKey(ownerAddress),
+                    amount,
+                    minAmountOut
+                });
+                
+                // Check transaction size
+                if (swapInstruction.data.length > this.maxTransactionSize) {
+                    throw new Error('Transaction size exceeds maximum limit');
+                }
+                
+                // Create and sign transaction
+                const transaction = new Transaction().add(swapInstruction);
+                transaction.feePayer = new PublicKey(ownerAddress);
+                
+                // Get recent blockhash
+                const { blockhash } = await this.connection.getRecentBlockhash();
+                transaction.recentBlockhash = blockhash;
+                
+                // Sign and send transaction
+                const signature = await sendAndConfirmTransaction(
+                    this.connection,
+                    transaction,
+                    [new PublicKey(ownerAddress)],
+                    { commitment: 'confirmed' }
+                );
+                
+                log.transaction(signature, 'success', {
+                    type: 'swap',
+                    amount,
+                    minAmountOut
+                });
+                
+                return signature;
+            } catch (error) {
+                attempt++;
+                if (attempt === this.maxRetries) {
+                    log.error('Swap failed after max retries', error, {
+                        amount,
+                        attempt
+                    });
+                    throw error;
+                }
+                
+                log.warn(`Swap attempt ${attempt} failed, retrying...`, {
+                    error: error.message,
+                    amount
+                });
+                
+                await new Promise(resolve => setTimeout(resolve, this.retryDelay));
             }
-
-            const owner = new PublicKey(ownerAddress);
-            const amountIn = new Decimal(amount).mul(10 ** this.config.token.decimals);
-
-            // Get swap instructions
-            const { innerTransactions } = await Liquidity.makeSwapInstructionSimple({
-                connection: this.connection,
-                poolInfo: this.poolInfo,
-                userKeys: {
-                    tokenAccounts: [], // Will be populated by SDK
-                    owner
-                },
-                amountIn: amountIn.toString(),
-                currencyIn: this.config.tokenMint,
-                currencyOut: this.config.wbtc.mint,
-                slippage: new Percent(1, 100) // 1% slippage
-            });
-
-            // Create and send transaction
-            const transaction = new Transaction();
-            
-            for (const ix of innerTransactions[0].instructions) {
-                transaction.add(ix);
-            }
-
-            const { blockhash } = await this.connection.getLatestBlockhash();
-            transaction.recentBlockhash = blockhash;
-            transaction.feePayer = owner;
-
-            // Send transaction
-            const signature = await this.connection.sendTransaction(transaction, [/* Add required signers */]);
-            
-            // Confirm transaction
-            await this.connection.confirmTransaction({
-                signature,
-                blockhash: transaction.recentBlockhash,
-                lastValidBlockHeight: (await this.connection.getLatestBlockhash()).lastValidBlockHeight
-            });
-
-            return signature;
-        } catch (error) {
-            console.error('Error swapping tokens:', error);
-            throw error;
         }
     }
 
@@ -131,17 +155,26 @@ class SwapManager {
      */
     async checkPoolLiquidity(amount) {
         try {
-            if (!this.poolInfo) {
-                await this.initializePool();
+            const poolInfo = await this.market.getPoolInfo();
+            const requiredLiquidity = new Decimal(amount)
+                .mul(this.config.raydium.minimumLiquidity)
+                .toString();
+            
+            if (new Decimal(poolInfo.baseTokenAmount).lt(requiredLiquidity)) {
+                throw new Error('Insufficient pool liquidity');
             }
-
-            const { baseReserve, quoteReserve } = this.poolInfo;
-            const amountIn = new Decimal(amount).mul(10 ** this.config.token.decimals);
-
-            // Check if pool has at least 2x the required liquidity
-            return amountIn.lte(baseReserve.div(2));
+            
+            log.info('Pool liquidity check passed', {
+                poolLiquidity: poolInfo.baseTokenAmount,
+                requiredLiquidity
+            });
+            
+            return true;
         } catch (error) {
-            console.error('Error checking pool liquidity:', error);
+            log.error('Pool liquidity check failed', error, {
+                amount,
+                poolId: this.config.raydium.poolId
+            });
             throw error;
         }
     }
@@ -152,18 +185,18 @@ class SwapManager {
      */
     async getPoolStats() {
         try {
-            if (!this.poolInfo) {
-                await this.initializePool();
-            }
-
-            return {
-                liquidity: this.poolInfo.baseReserve.toString(),
-                volume24h: this.poolInfo.volume24h?.toString() || '0',
-                fee: this.poolInfo.fee.toString(),
-                tokenPrice: this.poolInfo.price.toString()
+            const poolInfo = await this.market.getPoolInfo();
+            const stats = {
+                baseTokenAmount: poolInfo.baseTokenAmount,
+                quoteTokenAmount: poolInfo.quoteTokenAmount,
+                price: poolInfo.price,
+                volume24h: poolInfo.volume24h
             };
+            
+            log.info('Pool stats retrieved', stats);
+            return stats;
         } catch (error) {
-            console.error('Error getting pool stats:', error);
+            log.error('Failed to get pool stats', error);
             throw error;
         }
     }

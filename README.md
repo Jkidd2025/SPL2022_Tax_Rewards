@@ -145,200 +145,265 @@ To contribute to this project:
 
 ## Mainnet Deployment Guide
 
-### Prerequisites
+### Phase 1: Development Completion
 
-1. **Mainnet Requirements**
-
-   - Minimum 5 SOL for deployment and operations
-   - WBTC pool liquidity confirmed on mainnet
-   - Production RPC endpoint (recommend using paid endpoints for reliability)
-
-2. **Security Requirements**
-
-   - Hardware wallet (e.g., Ledger) for critical accounts
-   - Secure, isolated deployment environment
-   - Backup solutions for all keypairs
-   - Network security measures (VPN, firewall)
-
-3. **Account Requirements**
-   - Token Authority Account (hardware wallet recommended)
-   - Tax Collector Account (dedicated account)
-   - Rewards Account (dedicated account)
-   - Treasury Account (hardware wallet recommended)
-
-### Pre-Deployment Checklist
-
-1. **Configuration Setup**
+1. **Code Updates**
 
    ```bash
-   # Create mainnet configuration
-   cp config.json config.mainnet.json
+   # Install additional dependencies
+   npm install winston @sentry/node decimal.js
    ```
 
-2. **Update config.mainnet.json**
-   ```json
-   {
-     "network": {
-       "endpoint": "YOUR_MAINNET_RPC_ENDPOINT",
-       "alternateEndpoints": ["BACKUP_RPC_ENDPOINT_1", "BACKUP_RPC_ENDPOINT_2"]
-     },
-     "wallets": {
-       "tokenAuthority": {
-         "publicKey": "MAINNET_TOKEN_AUTHORITY_PUBLIC_KEY"
-       },
-       "taxCollector": {
-         "publicKey": "MAINNET_TAX_COLLECTOR_PUBLIC_KEY"
-       },
-       "rewardsAccount": {
-         "publicKey": "MAINNET_REWARDS_ACCOUNT_PUBLIC_KEY"
-       }
-     },
-     "wbtc": {
-       "mint": "MAINNET_WBTC_MINT_ADDRESS",
-       "decimals": 8,
-       "minimumDistributionThreshold": 0.00001
-     },
-     "rewards": {
-       "minimumTokenHoldingRequirement": 50000
-     },
-     "swapConfig": {
-       "poolAddress": "MAINNET_WBTC_POOL_ADDRESS",
-       "minimumAmountOut": 0
-     }
-   }
-   ```
+   - [ ] Implement transaction retry logic
+   - [ ] Add transaction size limits
+   - [ ] Implement comprehensive logging
+   - [ ] Add emergency pause functionality
+   - [ ] Create transaction simulation checks
 
-### Deployment Steps
-
-1. **Environment Setup**
+2. **Configuration Verification**
 
    ```bash
-   # Switch to mainnet
+   # Verify configuration structure
+   node scripts/verify_config.js
+
+   # Test configuration loading
+   node scripts/test_config_load.js
+   ```
+
+   - [ ] Verify all mainnet addresses
+   - [ ] Confirm Raydium pool settings
+   - [ ] Validate token decimals
+   - [ ] Check minimum thresholds
+
+### Phase 2: Testing and Verification
+
+1. **Local Testing**
+
+   ```bash
+   # Run test suite
+   npm run test
+
+   # Run specific test categories
+   npm run test:swap
+   npm run test:rewards
+   npm run test:security
+   ```
+
+   - [ ] Unit tests for all components
+   - [ ] Integration tests for swap functionality
+   - [ ] Security test cases
+   - [ ] Error handling verification
+
+2. **Devnet Deployment**
+
+   ```bash
+   # Deploy to devnet
+   npm run deploy:devnet
+
+   # Run integration tests
+   npm run test:integration:devnet
+   ```
+
+   - [ ] Full system test on devnet
+   - [ ] Performance testing
+   - [ ] Load testing
+   - [ ] Error recovery testing
+
+### Phase 3: Security Setup
+
+1. **Wallet Security**
+
+   ```bash
+   # Generate new mainnet wallets
+   solana-keygen new --outfile wallets/mainnet/rewards.json
+   solana-keygen new --outfile wallets/mainnet/tax-collector.json
+   ```
+
+   - [ ] Hardware wallet setup
+   - [ ] Multi-sig configuration
+   - [ ] Backup procedures
+   - [ ] Access control implementation
+
+2. **Monitoring Setup**
+
+   ```bash
+   # Configure monitoring
+   node scripts/setup_monitoring.js
+
+   # Test alert system
+   node scripts/test_alerts.js
+   ```
+
+   - [ ] Transaction monitoring
+   - [ ] Error alerting
+   - [ ] Balance monitoring
+   - [ ] Performance metrics
+
+### Phase 4: Mainnet Preparation
+
+1. **Network Configuration**
+
+   ```bash
+   # Set up mainnet connection
    solana config set --url mainnet-beta
 
    # Verify connection
    solana cluster-version
    ```
 
-2. **Account Setup**
+   - [ ] RPC endpoint configuration
+   - [ ] Backup RPC setup
+   - [ ] Network stability verification
+   - [ ] Rate limit configuration
+
+2. **Account Funding**
 
    ```bash
-   # Create secure directory for mainnet wallets
-   mkdir -p wallets/mainnet
-   chmod 700 wallets/mainnet
-
-   # Generate accounts (if not using hardware wallet)
-   solana-keygen new --outfile wallets/mainnet/tax-collector.json
-   solana-keygen new --outfile wallets/mainnet/rewards.json
+   # Fund operational accounts
+   solana transfer <TAX_COLLECTOR_ADDRESS> 5 --allow-unfunded-recipient
+   solana transfer <REWARDS_ADDRESS> 5 --allow-unfunded-recipient
    ```
 
-3. **Tax Collector Setup**
+   - [ ] Minimum SOL requirements
+   - [ ] Operating budget calculation
+   - [ ] Emergency fund allocation
+   - [ ] Fee buffer setup
+
+### Phase 5: Deployment Process
+
+1. **Pre-deployment Verification**
 
    ```bash
-   # Fund tax collector account
-   solana transfer <TAX_COLLECTOR_ADDRESS> 2 --allow-unfunded-recipient
+   # Run pre-deployment checks
+   node scripts/pre_deployment_check.js
 
-   # Initialize tax collector
-   NODE_ENV=production node setup_tax_collector.js --config config.mainnet.json
+   # Verify pool liquidity
+   node scripts/check_pool_liquidity.js
    ```
 
-4. **Initial Testing**
+   - [ ] Configuration validation
+   - [ ] Account permission verification
+   - [ ] Pool liquidity confirmation
+   - [ ] System readiness check
+
+2. **Deployment Steps**
 
    ```bash
-   # Verify tax collection
-   node check_balances.js --config config.mainnet.json
+   # Deploy system components
+   npm run deploy:mainnet
 
-   # Test small transfer
-   node distribute_wbtc_rewards.js --config config.mainnet.json --test-mode
+   # Verify deployment
+   npm run verify:mainnet
    ```
 
-### Post-Deployment Verification
+   - [ ] Sequential component deployment
+   - [ ] Verification after each step
+   - [ ] Initial test transactions
+   - [ ] System pause capability verification
 
-1. **System Checks**
+### Phase 6: Post-Deployment
 
-   - [ ] Tax collector account initialized and funded
-   - [ ] WBTC pool connection verified
-   - [ ] Test transfer completed successfully
-   - [ ] All account balances correct
-   - [ ] Rewards distribution tested with small amount
-
-2. **Security Verification**
-
-   - [ ] All private keys secured
-   - [ ] Hardware wallets configured correctly
-   - [ ] Backup procedures tested
-   - [ ] Access controls implemented
-
-3. **Monitoring Setup**
-   - [ ] Transaction monitoring configured
-   - [ ] Balance alerts set up
-   - [ ] Error reporting system active
-   - [ ] Backup RPC endpoints verified
-
-### Regular Maintenance
-
-1. **Daily Operations**
+1. **System Verification**
 
    ```bash
-   # Check system health
-   node check_balances.js --config config.mainnet.json
+   # Run system checks
+   node scripts/verify_deployment.js
 
-   # Review tax collection
-   node view_tax_stats.js --config config.mainnet.json
+   # Test core functionality
+   node scripts/test_core_functions.js
    ```
 
-2. **Weekly Tasks**
+   - [ ] All components operational
+   - [ ] Monitoring systems active
+   - [ ] Alert systems functioning
+   - [ ] Backup systems ready
 
-   - Review transaction logs
-   - Verify WBTC pool liquidity
-   - Check for any system updates
-   - Backup configuration files
-
-3. **Monthly Tasks**
-   - Comprehensive system audit
-   - Review and adjust thresholds if needed
-   - Update RPC endpoints if necessary
-   - Verify backup procedures
+2. **Documentation Update**
+   - [ ] Deployment records
+   - [ ] Configuration documentation
+   - [ ] Emergency procedures
+   - [ ] Contact information
 
 ### Emergency Procedures
 
 1. **System Issues**
 
-   - Use backup RPC endpoints
-   - Pause distributions if necessary
-   - Contact technical support
-   - Follow incident response plan
-
-2. **Security Issues**
-
    ```bash
-   # Pause all operations
-   node pause_operations.js --config config.mainnet.json
+   # Pause system
+   node scripts/emergency_pause.js
 
-   # Transfer to backup accounts if needed
-   node emergency_transfer.js --config config.mainnet.json
+   # Execute emergency withdrawal
+   node scripts/emergency_withdraw.js
    ```
 
-### Important Notes
+2. **Recovery Process**
 
-1. **Transaction Fees**
+   ```bash
+   # System recovery
+   node scripts/system_recovery.js
 
-   - Maintain minimum 2 SOL for operations
-   - Monitor fee changes
-   - Adjust gas settings as needed
+   # Verify system state
+   node scripts/verify_system_state.js
+   ```
 
-2. **Security Best Practices**
+### Maintenance Procedures
 
-   - Never share private keys
-   - Use hardware wallets for large holdings
-   - Regular security audits
-   - Keep software updated
+1. **Regular Checks**
 
-3. **Compliance**
-   - Document all transactions
-   - Maintain operation logs
-   - Follow regulatory requirements
-   - Keep configuration backups
+   ```bash
+   # Daily health check
+   npm run health-check
+
+   # Weekly maintenance
+   npm run maintenance
+   ```
+
+2. **Update Procedures**
+
+   ```bash
+   # System updates
+   npm run update
+
+   # Configuration updates
+   npm run update-config
+   ```
+
+## Security Considerations
+
+1. **Transaction Security**
+
+   - Maximum transaction size limits
+   - Retry logic for failed transactions
+   - Transaction simulation before execution
+   - Rate limiting implementation
+
+2. **Account Security**
+
+   - Hardware wallet integration
+   - Multi-signature requirements
+   - Account activity monitoring
+   - Automatic alerts for suspicious activity
+
+3. **Network Security**
+   - RPC endpoint redundancy
+   - Connection monitoring
+   - Rate limit management
+   - Error handling and recovery
+
+## Monitoring and Maintenance
+
+1. **System Monitoring**
+
+   - Transaction success rates
+   - Account balances
+   - Pool liquidity levels
+   - Network performance
+
+2. **Alert System**
+   - Failed transaction alerts
+   - Balance threshold alerts
+   - Error condition notifications
+   - System pause notifications
 
 ## License
 
