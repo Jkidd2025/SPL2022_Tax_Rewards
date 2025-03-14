@@ -6,49 +6,53 @@
             "https://rpc.ankr.com/solana"
         ]
     },
-    "tokenMint": "MAINNET_TOKEN_MINT_ADDRESS",
     "wallets": {
         "tokenAuthority": {
-            "publicKey": "MAINNET_TOKEN_AUTHORITY_PUBLIC_KEY"
+            "publicKey": "Q8oMuUDoUuXitpejLaeKDpobySPa5taJx74CFP5xgbU"
         },
         "mintAuthority": {
-            "publicKey": "MAINNET_MINT_AUTHORITY_PUBLIC_KEY"
+            "publicKey": "DhbXhxQCqedvoy3e4BfuXHooo2cHRFmyqLqYqK1jC7Hb"
         },
         "treasury": {
-            "publicKey": "MAINNET_TREASURY_PUBLIC_KEY"
+            "publicKey": "2DaqCRMC5nW7CEyewjykaC8hax8UepQQGNhMsuHo6D9N"
         },
         "taxCollector": {
-            "publicKey": "MAINNET_TAX_COLLECTOR_PUBLIC_KEY"
+            "publicKey": "Do1HCJTdpfb3LPAkZp78HdKowQVCVN7eRwwDNgrUooFW"
         },
         "rewardsAccount": {
-            "publicKey": "MAINNET_REWARDS_ACCOUNT_PUBLIC_KEY"
+            "publicKey": "DVyvGopDxCD2mFUKLAfP76PPgmBzGK9Waq8Ui4vZJX2"
         }
     },
     "token": {
-        "name": "Stealth Mode Startup",
-        "symbol": "SMS",
-        "description": "Stealth Mode Startup ($SMS) Token",
-        "decimals": 6,
-        "initialSupply": 1000000000,
-        "uri": "https://raw.githubusercontent.com/Jkidd2025/spl-token-2022-v2/main/assets/metadata.json"
+        "mint": "",
+        "decimals": 9,
+        "name": "BPay",
+        "symbol": "BPAY",
+        "description": "BPAY is a WBTC payment system that allows users to receive reward payments in WBTC",
+        "metadataUri": ""
     },
     "wbtc": {
         "mint": "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh",
         "decimals": 8,
         "minimumDistributionThreshold": 0.00001
     },
+    "raydium": {
+        "poolId": "",
+        "marketId": "",
+        "marketProgramId": "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8",
+        "minimumLiquidity": 1000,
+        "slippage": 1
+    },
     "rewards": {
         "minimumTokenHoldingRequirement": 50000
     },
-    "raydium": {
-        "poolId": "MAINNET_RAYDIUM_POOL_ID",
-        "ammAuthority": "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1",
-        "ammOpenOrders": "MAINNET_AMM_OPEN_ORDERS",
-        "poolTempLp": "MAINNET_POOL_TEMP_LP",
-        "marketId": "MAINNET_MARKET_ID",
-        "marketProgramId": "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
-        "swapProgramId": "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8",
-        "slippage": 1.0,
-        "minPoolLiquidity": 1000
+    "monitoring": {
+        "webhookUrl": "",
+        "alertThresholds": {
+            "minSolBalance": 0.1,
+            "minPoolLiquidity": 1000,
+            "maxPriceChange": 5,
+            "minHolders": 10
+        }
     }
 } 
