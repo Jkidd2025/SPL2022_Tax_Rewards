@@ -15,7 +15,25 @@
     },
     "treasury": {
       "publicKey": "6ND4vrfrTyrUgWcyTHirg6yDNqeFsiCsc63suZko8FjD"
+    },
+    "taxCollector": {
+      "publicKey": "YOUR_TAX_COLLECTOR_PUBLIC_KEY"
+    },
+    "rewardsAccount": {
+      "publicKey": "YOUR_REWARDS_ACCOUNT_PUBLIC_KEY"
     }
   },
-  "tokenMint": "6ABBo9Y2nVtXuhVmnWmkrLMtfrvxuHJngQGLfeyXk1d8"
+  "tokenMint": "6ABBo9Y2nVtXuhVmnWmkrLMtfrvxuHJngQGLfeyXk1d8",
+  "wbtc": {
+    "mint": "YOUR_WBTC_MINT_ADDRESS",
+    "decimals": 8,
+    "minimumDistributionThreshold": 0.00001
+  },
+  "rewards": {
+    "minimumTokenHoldingRequirement": 50000
+  },
+  "swapConfig": {
+    "poolAddress": "YOUR_SWAP_POOL_ADDRESS",
+    "minimumAmountOut": 0
+  }
 }

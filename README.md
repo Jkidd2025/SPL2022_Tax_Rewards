@@ -1,170 +1,41 @@
-# SPL Token 2022 v2
+# Solana Token Tax and Rewards System
 
-This repository contains the implementation of the Stealth Mode Startup ($SMS) token on Solana's devnet using SPL Token 2022 standard.
-
-## Token Details
-
-- **Name**: Stealth Mode Startup
-- **Symbol**: SMS
-- **Total Supply**: 1,000,000,000 (1 billion) tokens
-- **Decimals**: 6
-- **Token Mint Address**: `6ABBo9Y2nVtXuhVmnWmkrLMtfrvxuHJngQGLfeyXk1d8`
-- **Metadata Account**: `E3WnVs4fidMVAin47u6i1eTvm6d81SNvoDrVHxACHtAX`
-
-## Security Features
-
-### Immutable Supply
-
-- Mint authority has been permanently disabled
-- Transaction signature: `87e16fa` (mint creation and initial supply)
-- No additional tokens can be minted
-
-### Immutable Metadata
-
-- Metadata update authority has been permanently disabled
-- Transaction signature: `4C2xjE9P5uszvrgVTuLhPoR9qzGtE6hVrABtuhy6NmqxdArwbZsH64wNUgCMvxcm3nfLePJr35MeUPqt5CQ22Du`
-- Token metadata (name, symbol, URI) cannot be modified
-
-## Testing Confirmations
-
-### Token Creation and Supply
-
-- ✅ Successfully created token mint
-- ✅ Minted initial supply of 1 billion tokens
-- ✅ Verified token metadata on-chain
-- ✅ Confirmed token appears on Solscan (devnet)
-
-### Transfer Testing
-
-- ✅ Created test wallet: `5GL8Ffo7dDmqKjiDZFWkUvxqB141ezcaRnX3QnwAq4XF`
-- ✅ Successfully transferred 1,000 tokens to test wallet
-- ✅ Transaction signature: `4jfBoVFoJRwqnghLniaFGKqJogWWFampUkfVQQJiQ3f6hwzXMrkqEXi4hNSNstk6MbZyjqekBocKKXb1pHsryRvM`
-- ✅ Verified balances after transfer:
-  - Treasury: 999,999,000 SMS
-  - Test Wallet: 1,000 SMS
-
-### Security Testing
-
-- ✅ Confirmed mint authority is disabled
-- ✅ Confirmed metadata is immutable
-- ✅ Verified token supply cannot be increased
-- ✅ Verified metadata cannot be modified
-
-## Repository Structure
-
-```
-.
-├── assets/
-│   ├── logo.png
-│   └── metadata.json
-├── wallets/
-│   ├── token-authority.json
-│   ├── mint-authority.json
-│   └── treasury.json
-├── create_token.js
-├── transfer_tokens.js
-├── disable_minting.js
-└── disable_metadata_updates.js
-```
-
-## Scripts
-
-- `create_token.js`: Creates the token mint and initial supply
-- `transfer_tokens.js`: Handles token transfers between accounts
-- `disable_minting.js`: Disables the mint authority
-- `disable_metadata_updates.js`: Makes token metadata immutable
-
-## Verification Links
-
-- Token on Solscan: [View on Devnet](https://solscan.io/token/6ABBo9Y2nVtXuhVmnWmkrLMtfrvxuHJngQGLfeyXk1d8?cluster=devnet)
-- Metadata: [View JSON](https://raw.githubusercontent.com/Jkidd2025/spl-token-2022-v2/main/assets/metadata.json)
-
-## Dependencies
-
-```json
-{
-  "@solana/spl-token": "latest",
-  "@solana/web3.js": "latest",
-  "@metaplex-foundation/mpl-token-metadata": "latest"
-}
-```
+A comprehensive Solana-based token management system that implements automatic tax collection and WBTC reward distribution for token holders.
 
 ## Features
 
-### Core Token Operations
+### Tax Collection
 
-- Create new SPL tokens
-- Create token accounts
-- Mint tokens
-- Transfer tokens
-- Check token balances
+- Automatic 5% tax on all token transfers
+- Dedicated tax collector account
+- Tax balance monitoring and withdrawal capabilities
 
-### Wallet Management
+### WBTC Rewards Distribution
 
-- Token Authority: Creates and manages token setup
-- Mint Authority: Controls token minting
-- Treasury: Manages token distribution
-
-## Project Structure
-
-```
-/
-├── src/
-│   ├── managers/
-│   │   ├── TokenManager.js    # Token operations
-│   │   └── WalletManager.js   # Wallet management
-├── wallets/                   # Wallet keypair files
-├── index.js                   # Main program
-├── config.json                # Configuration
-├── .env                       # Private keys (not committed)
-└── README.md
-```
+- Automatic conversion of collected taxes to WBTC
+- 50% of collected taxes distributed as WBTC rewards
+- Minimum holding requirement of 50,000 tokens to qualify for rewards
+- Proportional distribution based on token holdings
+- Minimum WBTC distribution threshold to prevent dust transactions
 
 ## Prerequisites
 
 - Node.js v14+ and npm
 - Solana Tool Suite
-- Solana devnet account with SOL
-
-## Installation
-
-1. Clone the repository:
-
-```bash
-git clone https://github.com/Jkidd2025/spl-token-2022-v2.git
-cd spl-token-2022-v2
-```
-
-2. Install dependencies:
-
-```bash
-npm install
-```
+- A Solana wallet with SOL for transaction fees
 
 ## Configuration
 
-1. Create wallet keypairs:
-
-```bash
-solana-keygen new --outfile wallets/token-authority.json
-solana-keygen new --outfile wallets/mint-authority.json
-solana-keygen new --outfile wallets/treasury.json
-```
-
-2. Set up environment variables in `.env`:
-
-```
-TOKEN_AUTHORITY_PRIVATE_KEY="[...]"
-MINT_AUTHORITY_PRIVATE_KEY="[...]"
-TREASURY_PRIVATE_KEY="[...]"
-```
-
-3. Update `config.json` with wallet public keys:
+Create a `config.json` file in the root directory:
 
 ```json
 {
   "network": {
-    "endpoint": "https://api.devnet.solana.com"
+    "endpoint": "https://api.devnet.solana.com",
+    "alternateEndpoints": [
+      "https://devnet.solana.rpcpool.com",
+      "https://rpc-devnet.helius.xyz/?api-key=YOUR_API_KEY"
+    ]
   },
   "wallets": {
     "tokenAuthority": {
@@ -175,166 +46,107 @@ TREASURY_PRIVATE_KEY="[...]"
     },
     "treasury": {
       "publicKey": "YOUR_TREASURY_PUBLIC_KEY"
+    },
+    "taxCollector": {
+      "publicKey": "YOUR_TAX_COLLECTOR_PUBLIC_KEY"
+    },
+    "rewardsAccount": {
+      "publicKey": "YOUR_REWARDS_ACCOUNT_PUBLIC_KEY"
     }
+  },
+  "tokenMint": "YOUR_TOKEN_MINT_ADDRESS",
+  "wbtc": {
+    "mint": "YOUR_WBTC_MINT_ADDRESS",
+    "decimals": 8,
+    "minimumDistributionThreshold": 0.00001
+  },
+  "rewards": {
+    "minimumTokenHoldingRequirement": 50000
+  },
+  "swapConfig": {
+    "poolAddress": "YOUR_SWAP_POOL_ADDRESS",
+    "minimumAmountOut": 0
   }
 }
 ```
 
-## Wallet Requirements
+## Installation
 
-Each wallet needs SOL on devnet to perform operations:
+1. Clone the repository:
 
-- Token Authority: ~2 SOL (token creation, account creation)
-- Mint Authority: ~1 SOL (minting operations)
-- Treasury: ~1 SOL (transfer operations)
+```bash
+git clone https://github.com/yourusername/solana-tax-rewards.git
+cd solana-tax-rewards
+```
 
-Get SOL from:
+2. Install dependencies:
 
-1. Solana Devnet Faucet: https://faucet.solana.com/
-2. CLI: `solana airdrop 2 <WALLET_ADDRESS> --url devnet`
+```bash
+npm install
+```
+
+3. Set up your wallet:
+
+- Create a `wallets` directory in the project root
+- Place your keypair JSON files in the `wallets` directory
+- Update `config.json` with your public keys
 
 ## Usage
 
-Run the program:
+### Setting up the Tax Collector
 
 ```bash
-node index.js
+node setup_tax_collector.js
 ```
 
-The program will:
+### Distributing WBTC Rewards
 
-1. Check wallet balances
-2. Create a new token
-3. Create token accounts
-4. Mint initial supply
-5. Perform a test transfer
-6. Display token information
+```bash
+node distribute_wbtc_rewards.js
+```
 
-## Security Notes
+This script will:
 
-- Keep your private keys secure
-- Never commit the `.env` file
-- Use separate wallets for different responsibilities
-- Always test on devnet first
+1. Check the current tax collection balance
+2. Calculate 50% for rewards
+3. Convert tokens to WBTC
+4. Distribute WBTC to qualified holders (50,000+ tokens)
+
+## Project Structure
+
+```
+├── config.json                 # Configuration file
+├── src/
+│   ├── managers/
+│   │   ├── TokenManager.js    # Token management functionality
+│   │   └── RewardsManager.js  # WBTC rewards distribution
+├── scripts/
+│   ├── setup_tax_collector.js # Tax collector setup
+│   └── distribute_rewards.js  # Rewards distribution
+└── wallets/                   # Wallet keypairs (not included in repo)
+```
+
+## Security Considerations
+
+- Keep your wallet keypairs secure and never commit them to the repository
+- Use environment variables for sensitive information
+- Regularly monitor tax collection and distribution transactions
+- Implement proper error handling and transaction confirmation checks
 
 ## Development
 
-To modify the program:
-
-1. Update wallet configurations in `config.json`
-2. Modify token parameters in `index.js`
-3. Add new functionality in the manager classes
-
-## Error Handling
-
-Common issues and solutions:
-
-- "Rate limit reached" - Wait for faucet limits to reset
-- "Insufficient funds" - Ensure wallets have enough SOL
-- "Account not found" - Verify wallet addresses
-
-## Contributing
+To contribute to this project:
 
 1. Fork the repository
-2. Create your feature branch
+2. Create a feature branch
 3. Commit your changes
 4. Push to the branch
 5. Create a Pull Request
 
-## Mainnet Deployment
+## License
 
-### Prerequisites
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-1. **Mainnet SOL**
+## Disclaimer
 
-   - Minimum 2 SOL recommended for deployment
-   - Split across deployment wallets:
-     - Token Authority: ~1 SOL
-     - Mint Authority: ~0.5 SOL
-     - Treasury: ~0.5 SOL
-
-2. **Secure Environment**
-
-   - Clean development machine
-   - Secure network connection
-   - Up-to-date software
-
-3. **Wallet Security**
-   - Fresh wallet keypairs
-   - Hardware wallet for Treasury (recommended)
-   - Backup of all keypairs
-
-### Deployment Steps
-
-1. **Metadata Preparation**
-
-   ```bash
-   # Update and verify metadata for mainnet
-   node prepare_mainnet_metadata.js
-
-   # Verify metadata URL after pushing changes
-   curl -s https://raw.githubusercontent.com/Jkidd2025/spl-token-2022-v2/main/assets/metadata.json
-   ```
-
-2. **Wallet Preparation**
-
-   ```bash
-   # Create new mainnet wallets
-   solana-keygen new --outfile wallets/mainnet/token-authority.json
-   solana-keygen new --outfile wallets/mainnet/mint-authority.json
-   solana-keygen new --outfile wallets/mainnet/treasury.json
-
-   # Fund wallets with SOL
-   # Verify configuration
-   node deploy_mainnet.js
-   ```
-
-3. **Token Creation**
-
-   ```bash
-   # Create and mint token
-   node create_token.js --mainnet
-
-   # Verify token on Solscan
-   # Save token address
-   ```
-
-4. **Security Measures**
-
-   ```bash
-   # Disable minting
-   node disable_minting.js --mainnet
-
-   # Disable metadata updates
-   node disable_metadata_updates.js --mainnet
-   ```
-
-5. **Verification**
-   - Confirm token on Solscan
-   - Verify metadata
-   - Test token transfers
-   - Confirm authorities are disabled
-
-### Security Checklist
-
-- [ ] Fresh wallets created
-- [ ] Sufficient SOL in wallets
-- [ ] Metadata URI is permanent
-- [ ] Token parameters verified
-- [ ] Mint authority disabled
-- [ ] Metadata authority disabled
-- [ ] Transfer functionality tested
-- [ ] All transactions confirmed
-
-### Post-Deployment
-
-1. **Backup**
-
-   - Save all transaction signatures
-   - Backup wallet files
-   - Document token addresses
-
-2. **Cleanup**
-   - Secure or delete deployment wallets
-   - Clear environment variables
-   - Remove sensitive files
+This software is provided "as is", without warranty of any kind. Use at your own risk.

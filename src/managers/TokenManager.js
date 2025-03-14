@@ -14,6 +14,8 @@ const {
     createAssociatedTokenAccountInstruction,
     getAssociatedTokenAddress,
     createMintToInstruction,
+    createBurnInstruction,
+    createTransferInstruction,
     MINT_SIZE,
     TOKEN_ACCOUNT_SIZE
 } = require('@solana/spl-token');
@@ -45,7 +47,8 @@ class TokenManager {
         
         if (!config.wallets?.tokenAuthority?.publicKey ||
             !config.wallets?.mintAuthority?.publicKey ||
-            !config.wallets?.treasury?.publicKey) {
+            !config.wallets?.treasury?.publicKey ||
+            !config.wallets?.taxCollector?.publicKey) {
             throw new Error('Invalid wallet configuration');
         }
         
@@ -69,6 +72,7 @@ class TokenManager {
             this.tokenAuthorityKeypair = this.readKeypairFromFile(path.join(walletsDir, 'token-authority.json'));
             this.mintAuthorityKeypair = this.readKeypairFromFile(path.join(walletsDir, 'mint-authority.json'));
             this.treasuryKeypair = this.readKeypairFromFile(path.join(walletsDir, 'treasury.json'));
+            this.taxCollectorKeypair = this.readKeypairFromFile(path.join(walletsDir, 'tax-collector.json'));
             
             // Validate keypairs match config
             if (this.tokenAuthorityKeypair.publicKey.toBase58() !== this.config.wallets.tokenAuthority.publicKey) {
@@ -81,6 +85,10 @@ class TokenManager {
             
             if (this.treasuryKeypair.publicKey.toBase58() !== this.config.wallets.treasury.publicKey) {
                 throw new Error('Treasury keypair does not match config');
+            }
+
+            if (this.taxCollectorKeypair.publicKey.toBase58() !== this.config.wallets.taxCollector.publicKey) {
+                throw new Error('Tax Collector keypair does not match config');
             }
         } catch (error) {
             console.error('Error loading keypairs:', error.message);
@@ -414,12 +422,298 @@ class TokenManager {
     // Get token account balance
     async getTokenBalance(tokenAccountPubkey) {
         try {
-            const accountInfo = await this.connection.getTokenAccountBalance(
-                new PublicKey(tokenAccountPubkey)
-            );
-            return accountInfo.value;
+            const balance = await this.connection.getTokenAccountBalance(new PublicKey(tokenAccountPubkey));
+            return balance.value.uiAmount;
         } catch (error) {
             console.error('Error getting token balance:', error.message);
+            throw error;
+        }
+    }
+
+    /**
+     * Calculate tax amount for a given transfer amount
+     * @param {number} amount - The transfer amount
+     * @returns {number} The tax amount (5% of the transfer amount)
+     */
+    calculateTax(amount) {
+        return Math.floor(amount * 0.05); // 5% tax
+    }
+
+    /**
+     * Transfer tokens with 5% tax
+     * @param {string} fromPubkey - Source token account
+     * @param {string} toPubkey - Destination token account
+     * @param {number} amount - Amount to transfer
+     * @returns {Promise<string>} Transaction signature
+     */
+    async transferTokensWithTax(fromPubkey, toPubkey, amount) {
+        try {
+            // Validate inputs
+            if (!fromPubkey || !toPubkey || !amount) {
+                throw new Error('Missing required parameters for token transfer');
+            }
+
+            const mintPubkey = new PublicKey(this.config.tokenMint);
+            const from = new PublicKey(fromPubkey);
+            const to = new PublicKey(toPubkey);
+            const taxCollector = new PublicKey(this.config.wallets.taxCollector.publicKey);
+
+            // Calculate tax amount
+            const taxAmount = this.calculateTax(amount);
+            const transferAmount = amount - taxAmount;
+
+            // Convert amounts to raw units (considering decimals)
+            const mintInfo = await this.connection.getParsedAccountInfo(mintPubkey);
+            const decimals = mintInfo.value.data.parsed.info.decimals;
+            const rawTransferAmount = transferAmount * Math.pow(10, decimals);
+            const rawTaxAmount = taxAmount * Math.pow(10, decimals);
+
+            // Create transfer instruction for the main amount
+            const transferInstruction = createTransferInstruction(
+                from,
+                to,
+                this.tokenAuthorityKeypair.publicKey,
+                rawTransferAmount,
+                [],
+                TOKEN_PROGRAM_ID
+            );
+
+            // Create transfer instruction for the tax amount to tax collector
+            const taxTransferInstruction = createTransferInstruction(
+                from,
+                taxCollector,
+                this.tokenAuthorityKeypair.publicKey,
+                rawTaxAmount,
+                [],
+                TOKEN_PROGRAM_ID
+            );
+
+            // Create transaction
+            const transaction = new Transaction()
+                .add(transferInstruction)
+                .add(taxTransferInstruction);
+
+            // Get recent blockhash
+            const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash();
+            transaction.recentBlockhash = blockhash;
+            transaction.feePayer = this.tokenAuthorityKeypair.publicKey;
+            transaction.lastValidBlockHeight = lastValidBlockHeight;
+
+            // Sign and send transaction
+            console.log(`Transferring ${transferAmount} tokens (with ${taxAmount} tax)...`);
+            const signature = await this.connection.sendTransaction(
+                transaction,
+                [this.tokenAuthorityKeypair]
+            );
+
+            // Wait for confirmation
+            console.log('Waiting for confirmation...');
+            await this.confirmTransaction(signature);
+
+            console.log('Tokens transferred successfully!');
+            console.log(`Amount transferred: ${transferAmount}`);
+            console.log(`Tax amount: ${taxAmount}`);
+            console.log('Signature:', signature);
+
+            return signature;
+        } catch (error) {
+            console.error('Error transferring tokens with tax:', error.message);
+            throw error;
+        }
+    }
+
+    /**
+     * Burns tokens from a specified account
+     * @param {string} tokenAccountPubkey - The public key of the token account to burn from
+     * @param {number} amount - The amount of tokens to burn
+     * @param {string} mintPubkey - The public key of the token mint
+     * @returns {Promise<string>} The transaction signature
+     */
+    async burnTokens(tokenAccountPubkey, amount, mintPubkey) {
+        try {
+            // Validate inputs
+            if (!tokenAccountPubkey || !amount || !mintPubkey) {
+                throw new Error('Missing required parameters for token burning');
+            }
+
+            // Convert amount to raw units (considering decimals)
+            const mintInfo = await this.connection.getParsedAccountInfo(new PublicKey(mintPubkey));
+            const decimals = mintInfo.value.data.parsed.info.decimals;
+            const rawAmount = amount * Math.pow(10, decimals);
+
+            // Create burn instruction
+            const burnInstruction = createBurnInstruction(
+                new PublicKey(tokenAccountPubkey),
+                new PublicKey(mintPubkey),
+                this.tokenAuthorityKeypair.publicKey,
+                rawAmount
+            );
+
+            // Create transaction
+            const transaction = new Transaction().add(burnInstruction);
+
+            // Get recent blockhash
+            const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash();
+            transaction.recentBlockhash = blockhash;
+            transaction.feePayer = this.tokenAuthorityKeypair.publicKey;
+            transaction.lastValidBlockHeight = lastValidBlockHeight;
+
+            // Sign and send transaction
+            console.log(`Burning ${amount} tokens...`);
+            const signature = await this.connection.sendTransaction(
+                transaction,
+                [this.tokenAuthorityKeypair]
+            );
+
+            // Wait for confirmation
+            console.log('Waiting for confirmation...');
+            await this.confirmTransaction(signature);
+
+            console.log('Tokens burned successfully!');
+            console.log('Signature:', signature);
+
+            return signature;
+        } catch (error) {
+            console.error('Error burning tokens:', error.message);
+            throw error;
+        }
+    }
+
+    /**
+     * Get the current tax collection balance
+     * @returns {Promise<number>} The current balance of collected taxes
+     */
+    async getTaxCollectionBalance() {
+        try {
+            const taxCollectorPubkey = new PublicKey(this.config.wallets.taxCollector.publicKey);
+            const balance = await this.getTokenBalance(taxCollectorPubkey);
+            console.log(`Current tax collection balance: ${balance} tokens`);
+            return balance;
+        } catch (error) {
+            console.error('Error getting tax collection balance:', error.message);
+            throw error;
+        }
+    }
+
+    /**
+     * Calculate withdrawal amount based on percentage
+     * @param {number} totalAmount - The total amount available
+     * @param {number} percentage - The percentage to withdraw (0-100)
+     * @returns {number} The calculated amount to withdraw
+     */
+    calculatePercentageAmount(totalAmount, percentage) {
+        if (percentage < 0 || percentage > 100) {
+            throw new Error('Percentage must be between 0 and 100');
+        }
+        return Math.floor(totalAmount * (percentage / 100));
+    }
+
+    /**
+     * Distribute rewards from collected taxes
+     * @param {string} rewardsAccountPubkey - The public key of the rewards account
+     * @param {number} percentage - The percentage of collected taxes to distribute (default 50%)
+     * @returns {Promise<string>} The transaction signature
+     */
+    async distributeRewards(rewardsAccountPubkey, percentage = 50) {
+        try {
+            // Get current tax collection balance
+            const currentBalance = await this.getTaxCollectionBalance();
+            if (currentBalance <= 0) {
+                throw new Error('No taxes available for distribution');
+            }
+
+            // Calculate reward amount
+            const rewardAmount = this.calculatePercentageAmount(currentBalance, percentage);
+            if (rewardAmount <= 0) {
+                throw new Error('Calculated reward amount is too small');
+            }
+
+            console.log(`\nDistributing ${percentage}% of collected taxes as rewards...`);
+            console.log(`Total tax collection: ${currentBalance} tokens`);
+            console.log(`Reward amount: ${rewardAmount} tokens`);
+
+            // Withdraw the calculated amount to rewards account
+            const signature = await this.withdrawCollectedTaxes(rewardsAccountPubkey, rewardAmount);
+
+            return signature;
+        } catch (error) {
+            console.error('Error distributing rewards:', error.message);
+            throw error;
+        }
+    }
+
+    /**
+     * Withdraw collected taxes to a specified destination
+     * @param {string} destinationPubkey - The public key of the destination account
+     * @param {number} amount - The amount of taxes to withdraw
+     * @param {number} percentage - The percentage of total balance to withdraw
+     * @returns {Promise<string>} The transaction signature
+     */
+    async withdrawCollectedTaxes(destinationPubkey, amount = null, percentage = null) {
+        try {
+            const taxCollectorPubkey = new PublicKey(this.config.wallets.taxCollector.publicKey);
+            const destination = new PublicKey(destinationPubkey);
+
+            // Get current balance
+            const currentBalance = await this.getTaxCollectionBalance();
+
+            // Calculate withdrawal amount based on percentage if specified
+            if (percentage !== null) {
+                amount = this.calculatePercentageAmount(currentBalance, percentage);
+            } else if (!amount) {
+                amount = currentBalance;
+            }
+
+            // Validate amount
+            if (amount <= 0) {
+                throw new Error('Invalid withdrawal amount');
+            }
+            if (amount > currentBalance) {
+                throw new Error('Withdrawal amount exceeds available balance');
+            }
+
+            // Convert amount to raw units
+            const mintPubkey = new PublicKey(this.config.tokenMint);
+            const mintInfo = await this.connection.getParsedAccountInfo(mintPubkey);
+            const decimals = mintInfo.value.data.parsed.info.decimals;
+            const rawAmount = amount * Math.pow(10, decimals);
+
+            // Create transfer instruction
+            const transferInstruction = createTransferInstruction(
+                taxCollectorPubkey,
+                destination,
+                this.taxCollectorKeypair.publicKey,
+                rawAmount,
+                [],
+                TOKEN_PROGRAM_ID
+            );
+
+            // Create transaction
+            const transaction = new Transaction().add(transferInstruction);
+
+            // Get recent blockhash
+            const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash();
+            transaction.recentBlockhash = blockhash;
+            transaction.feePayer = this.taxCollectorKeypair.publicKey;
+            transaction.lastValidBlockHeight = lastValidBlockHeight;
+
+            // Sign and send transaction
+            console.log(`Withdrawing ${amount} tokens from tax collection...`);
+            const signature = await this.connection.sendTransaction(
+                transaction,
+                [this.taxCollectorKeypair]
+            );
+
+            // Wait for confirmation
+            console.log('Waiting for confirmation...');
+            await this.confirmTransaction(signature);
+
+            console.log('Tax withdrawal completed successfully!');
+            console.log('Signature:', signature);
+
+            return signature;
+        } catch (error) {
+            console.error('Error withdrawing collected taxes:', error.message);
             throw error;
         }
     }
