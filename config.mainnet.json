@@ -1,18 +1,27 @@
 {
     "network": {
         "endpoint": "https://api.mainnet-beta.solana.com",
-        "commitment": "finalized"
+        "alternateEndpoints": [
+            "https://solana-api.projectserum.com",
+            "https://rpc.ankr.com/solana"
+        ]
     },
-    "tokenMint": null,
+    "tokenMint": "MAINNET_TOKEN_MINT_ADDRESS",
     "wallets": {
         "tokenAuthority": {
-            "publicKey": null
+            "publicKey": "MAINNET_TOKEN_AUTHORITY_PUBLIC_KEY"
         },
         "mintAuthority": {
-            "publicKey": null
+            "publicKey": "MAINNET_MINT_AUTHORITY_PUBLIC_KEY"
         },
         "treasury": {
-            "publicKey": null
+            "publicKey": "MAINNET_TREASURY_PUBLIC_KEY"
+        },
+        "taxCollector": {
+            "publicKey": "MAINNET_TAX_COLLECTOR_PUBLIC_KEY"
+        },
+        "rewardsAccount": {
+            "publicKey": "MAINNET_REWARDS_ACCOUNT_PUBLIC_KEY"
         }
     },
     "token": {
@@ -22,5 +31,17 @@
         "decimals": 6,
         "initialSupply": 1000000000,
         "uri": "https://raw.githubusercontent.com/Jkidd2025/spl-token-2022-v2/main/assets/metadata.json"
+    },
+    "wbtc": {
+        "mint": "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh",
+        "decimals": 8,
+        "minimumDistributionThreshold": 0.00001
+    },
+    "rewards": {
+        "minimumTokenHoldingRequirement": 50000
+    },
+    "swapConfig": {
+        "poolAddress": "MAINNET_WBTC_POOL_ADDRESS",
+        "minimumAmountOut": 0
     }
 } 

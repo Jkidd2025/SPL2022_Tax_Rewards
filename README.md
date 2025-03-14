@@ -143,6 +143,203 @@ To contribute to this project:
 4. Push to the branch
 5. Create a Pull Request
 
+## Mainnet Deployment Guide
+
+### Prerequisites
+
+1. **Mainnet Requirements**
+
+   - Minimum 5 SOL for deployment and operations
+   - WBTC pool liquidity confirmed on mainnet
+   - Production RPC endpoint (recommend using paid endpoints for reliability)
+
+2. **Security Requirements**
+
+   - Hardware wallet (e.g., Ledger) for critical accounts
+   - Secure, isolated deployment environment
+   - Backup solutions for all keypairs
+   - Network security measures (VPN, firewall)
+
+3. **Account Requirements**
+   - Token Authority Account (hardware wallet recommended)
+   - Tax Collector Account (dedicated account)
+   - Rewards Account (dedicated account)
+   - Treasury Account (hardware wallet recommended)
+
+### Pre-Deployment Checklist
+
+1. **Configuration Setup**
+
+   ```bash
+   # Create mainnet configuration
+   cp config.json config.mainnet.json
+   ```
+
+2. **Update config.mainnet.json**
+   ```json
+   {
+     "network": {
+       "endpoint": "YOUR_MAINNET_RPC_ENDPOINT",
+       "alternateEndpoints": ["BACKUP_RPC_ENDPOINT_1", "BACKUP_RPC_ENDPOINT_2"]
+     },
+     "wallets": {
+       "tokenAuthority": {
+         "publicKey": "MAINNET_TOKEN_AUTHORITY_PUBLIC_KEY"
+       },
+       "taxCollector": {
+         "publicKey": "MAINNET_TAX_COLLECTOR_PUBLIC_KEY"
+       },
+       "rewardsAccount": {
+         "publicKey": "MAINNET_REWARDS_ACCOUNT_PUBLIC_KEY"
+       }
+     },
+     "wbtc": {
+       "mint": "MAINNET_WBTC_MINT_ADDRESS",
+       "decimals": 8,
+       "minimumDistributionThreshold": 0.00001
+     },
+     "rewards": {
+       "minimumTokenHoldingRequirement": 50000
+     },
+     "swapConfig": {
+       "poolAddress": "MAINNET_WBTC_POOL_ADDRESS",
+       "minimumAmountOut": 0
+     }
+   }
+   ```
+
+### Deployment Steps
+
+1. **Environment Setup**
+
+   ```bash
+   # Switch to mainnet
+   solana config set --url mainnet-beta
+
+   # Verify connection
+   solana cluster-version
+   ```
+
+2. **Account Setup**
+
+   ```bash
+   # Create secure directory for mainnet wallets
+   mkdir -p wallets/mainnet
+   chmod 700 wallets/mainnet
+
+   # Generate accounts (if not using hardware wallet)
+   solana-keygen new --outfile wallets/mainnet/tax-collector.json
+   solana-keygen new --outfile wallets/mainnet/rewards.json
+   ```
+
+3. **Tax Collector Setup**
+
+   ```bash
+   # Fund tax collector account
+   solana transfer <TAX_COLLECTOR_ADDRESS> 2 --allow-unfunded-recipient
+
+   # Initialize tax collector
+   NODE_ENV=production node setup_tax_collector.js --config config.mainnet.json
+   ```
+
+4. **Initial Testing**
+
+   ```bash
+   # Verify tax collection
+   node check_balances.js --config config.mainnet.json
+
+   # Test small transfer
+   node distribute_wbtc_rewards.js --config config.mainnet.json --test-mode
+   ```
+
+### Post-Deployment Verification
+
+1. **System Checks**
+
+   - [ ] Tax collector account initialized and funded
+   - [ ] WBTC pool connection verified
+   - [ ] Test transfer completed successfully
+   - [ ] All account balances correct
+   - [ ] Rewards distribution tested with small amount
+
+2. **Security Verification**
+
+   - [ ] All private keys secured
+   - [ ] Hardware wallets configured correctly
+   - [ ] Backup procedures tested
+   - [ ] Access controls implemented
+
+3. **Monitoring Setup**
+   - [ ] Transaction monitoring configured
+   - [ ] Balance alerts set up
+   - [ ] Error reporting system active
+   - [ ] Backup RPC endpoints verified
+
+### Regular Maintenance
+
+1. **Daily Operations**
+
+   ```bash
+   # Check system health
+   node check_balances.js --config config.mainnet.json
+
+   # Review tax collection
+   node view_tax_stats.js --config config.mainnet.json
+   ```
+
+2. **Weekly Tasks**
+
+   - Review transaction logs
+   - Verify WBTC pool liquidity
+   - Check for any system updates
+   - Backup configuration files
+
+3. **Monthly Tasks**
+   - Comprehensive system audit
+   - Review and adjust thresholds if needed
+   - Update RPC endpoints if necessary
+   - Verify backup procedures
+
+### Emergency Procedures
+
+1. **System Issues**
+
+   - Use backup RPC endpoints
+   - Pause distributions if necessary
+   - Contact technical support
+   - Follow incident response plan
+
+2. **Security Issues**
+
+   ```bash
+   # Pause all operations
+   node pause_operations.js --config config.mainnet.json
+
+   # Transfer to backup accounts if needed
+   node emergency_transfer.js --config config.mainnet.json
+   ```
+
+### Important Notes
+
+1. **Transaction Fees**
+
+   - Maintain minimum 2 SOL for operations
+   - Monitor fee changes
+   - Adjust gas settings as needed
+
+2. **Security Best Practices**
+
+   - Never share private keys
+   - Use hardware wallets for large holdings
+   - Regular security audits
+   - Keep software updated
+
+3. **Compliance**
+   - Document all transactions
+   - Maintain operation logs
+   - Follow regulatory requirements
+   - Keep configuration backups
+
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
