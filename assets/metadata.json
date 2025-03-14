@@ -1,7 +1,7 @@
 {
-    "name": "Stealth Mode Startup",
-    "symbol": "SMS",
-    "description": "A stealth mode startup is a company that keeps its products, plans, and operations secret from the public and competitors.",
+    "name": "BPAY",
+    "symbol": "BPAY",
+    "description": "BPAY is a revolutionary payment token designed to streamline transactions and reward holders.",
     "image": "https://raw.githubusercontent.com/Jkidd2025/spl-token-2022-v2/main/assets/logo.png",
     "external_url": "https://github.com/Jkidd2025/spl-token-2022-v2",
     "attributes": [
@@ -15,7 +15,7 @@
         },
         {
             "trait_type": "Category",
-            "value": "Startup Token"
+            "value": "Payment Token"
         }
     ],
     "properties": {
