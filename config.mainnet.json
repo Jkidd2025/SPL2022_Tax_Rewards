@@ -1,11 +1,23 @@
 {
-    "network": {
-        "endpoint": "https://api.mainnet-beta.solana.com",
-        "alternateEndpoints": [
-            "https://solana-api.projectserum.com",
-            "https://rpc.ankr.com/solana"
-        ]
+    "network": "mainnet-beta",
+    "tokens": {
+        "base": {
+            "mint": "DVSSBXY2Kvpt7nmPRfbY9JNdgMnm8y6TvkkwoZiVQUiv",
+            "decimals": 6
+        },
+        "quote": {
+            "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            "decimals": 6
+        }
     },
+    "poolConfig": {
+        "initialTick": 0,
+        "tickSpacing": 60,
+        "startPrice": "1",
+        "baseAmount": "1000000",
+        "quoteAmount": "1000000"
+    },
+    "raydiumClmm": {},
     "wallets": {
         "tokenAuthority": {
             "publicKey": "HR72FjQpsw1aGCbz1pp8kNVBSsZNycEtvmEHNNrADeNu"
@@ -24,8 +36,6 @@
         }
     },
     "token": {
-        "mint": "DVSSBXY2Kvpt7nmPRfbY9JNdgMnm8y6TvkkwoZiVQUiv",
-        "decimals": 6,
         "name": "BPay",
         "symbol": "BPAY",
         "description": "BPAY is a WBTC payment system that allows users to receive reward payments in WBTC",

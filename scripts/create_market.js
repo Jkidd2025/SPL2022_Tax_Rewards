@@ -7,43 +7,60 @@ require('dotenv').config();
 
 // Market configuration
 const MARKET_CONFIG = {
+    // Base token is our token
+    baseMint: new PublicKey('DVSSBXY2Kvpt7nmPRfbY9JNdgMnm8y6TvkkwoZiVQUiv'),
     // USDC is the quote currency
     quoteMint: new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'), // USDC mint
-    // Base lot size is the smallest amount of BPAY that can be traded
-    baseLotSize: new BN(1000000), // 1 BPAY (6 decimals, total supply 1B)
+    // Base lot size is the smallest amount of base token that can be traded
+    baseLotSize: new BN(100000), // 0.1 token (6 decimals)
     // Quote lot size is the smallest amount of USDC that can be traded
     quoteLotSize: new BN(1000), // 0.001 USDC (USDC has 6 decimals)
     // Minimum allowed price increment
     tickSize: new BN(1000), // 0.001 USDC
-    // Initial fees
-    pcDustThreshold: new BN(1000),
-    baseDustThreshold: new BN(1000000),
+    // Initial fees and thresholds
+    pcDustThreshold: new BN(1000), // 0.001 USDC
+    baseDustThreshold: new BN(100000), // 0.1 token
     feeRateBps: 0, // 0% fee initially
 };
 
 // OpenBook DEX program ID
 const DEX_PID = new PublicKey('srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX');
 
+// Add compute budget instruction to handle larger initialization
+const COMPUTE_BUDGET = 1_400_000; // 1.4M compute units
+
 async function sendAndConfirmTransaction(connection, transaction, signers, retries = 3) {
     for (let i = 0; i < retries; i++) {
         try {
+            // Add compute budget instruction
+            const computeBudgetIx = web3.ComputeBudgetProgram.setComputeUnitLimit({
+                units: COMPUTE_BUDGET,
+            });
+            transaction.instructions.unshift(computeBudgetIx);
+
             const { blockhash } = await connection.getLatestBlockhash();
             transaction.recentBlockhash = blockhash;
             transaction.feePayer = signers[0].publicKey;
+            
+            // Clear any previous signatures
+            transaction.signatures = [];
+            
+            // Sign fresh
             transaction.sign(...signers);
 
             const signature = await connection.sendRawTransaction(transaction.serialize(), {
-                skipPreflight: false,
+                skipPreflight: true, // Skip preflight to handle larger transactions
                 preflightCommitment: 'confirmed',
             });
 
-            await connection.confirmTransaction(signature);
+            await connection.confirmTransaction(signature, 'confirmed');
             console.log('Transaction confirmed:', signature);
             return signature;
         } catch (error) {
+            console.error('Transaction error:', error);
             if (i === retries - 1) throw error;
             console.log(`Retrying transaction... (${i + 1}/${retries})`);
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Increased delay between retries
         }
     }
 }
@@ -127,25 +144,39 @@ async function checkBalanceAndRequirements(connection, marketAuthority) {
 
 async function createMarket() {
     try {
-        console.log('Creating new Serum/OpenBook market for BPAY/USDC...');
+        console.log('Creating new Serum/OpenBook market for BPAY/USDC...\n');
+
+        // Connect to Helius RPC with fallback
+        const heliusApiKey = process.env.HELIUS_API_KEY;
+        let rpcEndpoint = process.env.SOLANA_RPC_ENDPOINT;
+        
+        if (!heliusApiKey) {
+            console.warn('Warning: HELIUS_API_KEY not found in environment variables');
+            rpcEndpoint = process.env.SOLANA_RPC_ENDPOINT_BACKUP;
+        } else {
+            rpcEndpoint = rpcEndpoint.replace('${HELIUS_API_KEY}', heliusApiKey);
+        }
+
+        // Initialize connection
+        const connection = new Connection(rpcEndpoint, {
+            commitment: 'confirmed',
+            confirmTransactionInitialTimeout: 60000
+        });
 
         // Load market authority wallet
         const marketAuthority = Keypair.fromSecretKey(
             new Uint8Array(JSON.parse(fs.readFileSync('wallets/mainnet/token-authority.json')))
         );
 
-        // Connect to mainnet
-        const connection = new Connection(process.env.SOLANA_RPC_ENDPOINT, 'confirmed');
-
         // Check balance and requirements first
         await checkBalanceAndRequirements(connection, marketAuthority);
 
         // Load BPAY token mint from config
         const config = JSON.parse(fs.readFileSync('config.mainnet.json'));
-        if (!config.token.mint) {
-            throw new Error('BPAY token mint address not found in config.mainnet.json');
+        if (!config.tokens.base.mint) {
+            throw new Error('Base token mint address not found in config.mainnet.json');
         }
-        const baseMint = new PublicKey(config.token.mint);
+        const baseMint = new PublicKey(config.tokens.base.mint);
 
         // Generate market and vault owner keypairs
         const marketKeypair = Keypair.generate();
@@ -190,22 +221,11 @@ async function createMarket() {
         
         // Initialize base token vault
         console.log('Initializing base token vault...');
-        const baseVaultData = Buffer.alloc(AccountLayout.span);
-        AccountLayout.encode(
-            {
-                mint: baseMint,
-                owner: vaultOwner,
-                amount: 0,
-                delegateOption: 0,
-                delegate: PublicKey.default,
-                state: 1,
-                isNativeOption: 0,
-                isNative: 0,
-                delegatedAmount: 0,
-                closeAuthorityOption: 0,
-                closeAuthority: PublicKey.default,
-            },
-            baseVaultData
+        const initBaseVaultIx = createInitializeAccountInstruction(
+            baseVault.publicKey,
+            baseMint,
+            vaultOwner,
+            TOKEN_PROGRAM_ID
         );
 
         const initBaseVaultTx = new Transaction().add(
@@ -214,34 +234,17 @@ async function createMarket() {
                 toPubkey: baseVault.publicKey,
                 lamports: await connection.getMinimumBalanceForRentExemption(AccountLayout.span),
             }),
-            new TransactionInstruction({
-                keys: [
-                    { pubkey: baseVault.publicKey, isSigner: false, isWritable: true },
-                ],
-                programId: TOKEN_PROGRAM_ID,
-                data: baseVaultData,
-            })
+            initBaseVaultIx
         );
-        await sendAndConfirmTransaction(connection, initBaseVaultTx, [marketAuthority]);
+        await sendAndConfirmTransaction(connection, initBaseVaultTx, [marketAuthority, baseVault]);
 
         // Initialize quote token vault
         console.log('Initializing quote token vault...');
-        const quoteVaultData = Buffer.alloc(AccountLayout.span);
-        AccountLayout.encode(
-            {
-                mint: MARKET_CONFIG.quoteMint,
-                owner: vaultOwner,
-                amount: 0,
-                delegateOption: 0,
-                delegate: PublicKey.default,
-                state: 1,
-                isNativeOption: 0,
-                isNative: 0,
-                delegatedAmount: 0,
-                closeAuthorityOption: 0,
-                closeAuthority: PublicKey.default,
-            },
-            quoteVaultData
+        const initQuoteVaultIx = createInitializeAccountInstruction(
+            quoteVault.publicKey,
+            MARKET_CONFIG.quoteMint,
+            vaultOwner,
+            TOKEN_PROGRAM_ID
         );
 
         const initQuoteVaultTx = new Transaction().add(
@@ -250,15 +253,9 @@ async function createMarket() {
                 toPubkey: quoteVault.publicKey,
                 lamports: await connection.getMinimumBalanceForRentExemption(AccountLayout.span),
             }),
-            new TransactionInstruction({
-                keys: [
-                    { pubkey: quoteVault.publicKey, isSigner: false, isWritable: true },
-                ],
-                programId: TOKEN_PROGRAM_ID,
-                data: quoteVaultData,
-            })
+            initQuoteVaultIx
         );
-        await sendAndConfirmTransaction(connection, initQuoteVaultTx, [marketAuthority]);
+        await sendAndConfirmTransaction(connection, initQuoteVaultTx, [marketAuthority, quoteVault]);
 
         // Initialize market
         console.log('Initializing market...');
@@ -299,7 +296,7 @@ async function createMarket() {
         console.log('\nMarket Parameters:');
         console.log('Base Token (BPAY):', baseMint.toString());
         console.log('Quote Token (USDC):', MARKET_CONFIG.quoteMint.toString());
-        console.log('Base Lot Size:', MARKET_CONFIG.baseLotSize.toString(), '(1 BPAY)');
+        console.log('Base Lot Size:', MARKET_CONFIG.baseLotSize.toString(), '(0.1 token)');
         console.log('Quote Lot Size:', MARKET_CONFIG.quoteLotSize.toString(), '(0.001 USDC)');
         console.log('Tick Size:', MARKET_CONFIG.tickSize.toString(), '(0.001 USDC)');
         console.log('Initial Fee Rate:', MARKET_CONFIG.feeRateBps, 'bps');

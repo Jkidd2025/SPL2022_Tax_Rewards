@@ -4,21 +4,14 @@ const { struct, u64, u8, i32, u16 } = require('@project-serum/borsh');
 const BN = require('bn.js');
 const fs = require('fs');
 const path = require('path');
+const { Raydium } = require("@raydium-io/raydium-sdk-v2");
 require('dotenv').config();
 
-// Raydium CLMM Program IDs (per https://docs.raydium.io/raydium/protocol/developers/addresses)
-const RAYDIUM_CLMM_PROGRAM_IDS = {
-    mainnet: new PublicKey('CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK'),
-    devnet: null,  // Unknown; update if provided by Raydium
-    testnet: null  // Unknown; update if provided by Raydium
-};
+// Raydium CLMM Program ID
+const RAYDIUM_CLMM_PROGRAM_ID = new PublicKey('CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK');
 
-// AMM Config IDs
-const AMM_CONFIG_IDS = {
-    mainnet: new PublicKey('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1'),
-    devnet: null,  // Unknown; update if provided by Raydium
-    testnet: null  // Unknown; update if provided by Raydium
-};
+// AMM Config ID
+const AMM_CONFIG_ID = new PublicKey('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1');
 
 // Validation constants
 const MIN_TICK_SPACING = 1;
@@ -26,15 +19,15 @@ const MAX_TICK_SPACING = 1000;
 const MIN_TICK = -887220;
 const MAX_TICK = 887220;
 
+// Anchor discriminator for create_pool
+const CREATE_POOL_DISCRIMINATOR = Buffer.from([
+    0x68, 0x47, 0x84, 0x1c, 0x7a, 0xf9, 0xf6, 0x00  // create_pool discriminator
+]);
+
 // Define layout outside (it's constant)
 const CREATE_POOL_IX_DATA_LAYOUT = struct([
     i32('tick'),         // Initial tick (price)
     u16('tickSpacing')   // Tick spacing
-]);
-
-// Anchor discriminator for create_pool
-const CREATE_POOL_DISCRIMINATOR = Buffer.from([
-    0x0b, 0x39, 0x38, 0x16, 0x5b, 0x83, 0x19, 0x3c
 ]);
 
 const MAX_RETRIES = 5;
@@ -43,6 +36,15 @@ const INITIAL_BACKOFF_MS = 5000;
 const MAX_BACKOFF_MS = 60000;
 const TRANSACTION_SPACING_MS = 10000;
 const MAX_TRANSACTION_SIZE = 1232;
+
+// Pool Configuration
+const baseMint = new PublicKey('DVSSBXY2Kvpt7nmPRfbY9JNdgMnm8y6TvkkwoZiVQUiv');
+const quoteMint = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
+const baseTokenVault = Keypair.generate();
+const quoteTokenVault = Keypair.generate();
+const lpMint = Keypair.generate();
+const initialTick = 0;
+const tickSpacing = 60;
 
 async function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -199,7 +201,7 @@ async function cleanupAccounts(connection, authority, accounts) {
     }
 }
 
-async function createRaydiumClmmPool() {
+async function main() {
     let connection;
     let authority;
     const accountsToCleanup = [];
@@ -211,292 +213,122 @@ async function createRaydiumClmmPool() {
             new Uint8Array(JSON.parse(fs.readFileSync('wallets/mainnet/token-authority.json')))
         );
 
-        // Connect with fallback
+        // Connect to Helius RPC with fallback
+        const heliusApiKey = process.env.HELIUS_API_KEY;
         let rpcEndpoint = process.env.SOLANA_RPC_ENDPOINT;
-        try {
-            console.log('Attempting to connect to primary RPC:', rpcEndpoint);
-            connection = new Connection(rpcEndpoint, {
-                commitment: 'confirmed',
-                confirmTransactionInitialTimeout: CONFIRMATION_TIMEOUT * 1000
-            });
-            const slot = await connection.getSlot();
-            console.log('Connected to Solana network at slot:', slot);
-        } catch (error) {
-            console.log('Primary RPC failed:', error.message);
-            rpcEndpoint = process.env.SOLANA_RPC_ENDPOINT_BACKUP;
-            console.log('Trying backup RPC:', rpcEndpoint);
-            connection = new Connection(rpcEndpoint, {
-                commitment: 'confirmed',
-                confirmTransactionInitialTimeout: CONFIRMATION_TIMEOUT * 1000
-            });
-            const slot = await connection.getSlot();
-            console.log('Connected to Solana network at slot:', slot);
-        }
-
-        // Determine network
-        const version = await connection.getVersion();
-        const isMainnet = rpcEndpoint.includes('mainnet') || rpcEndpoint === 'https://api.mainnet-beta.solana.com';
-        const isDevnet = rpcEndpoint.includes('devnet');
-        const isTestnet = rpcEndpoint.includes('testnet');
-        const networkType = isMainnet ? 'mainnet' : isDevnet ? 'devnet' : isTestnet ? 'testnet' : 'unknown';
-
-        console.log('\nNetwork Information:');
-        console.log('Version:', version);
-        console.log('Network:', networkType);
-        console.log('RPC Endpoint:', connection.rpcEndpoint);
-
-        // Only allow mainnet for now since we don't have devnet/testnet program IDs
-        if (networkType !== 'mainnet') {
-            throw new Error('This script currently only supports mainnet. Devnet/testnet program IDs are not yet available.');
-        }
-
-        const RAYDIUM_CLMM_PROGRAM_ID = RAYDIUM_CLMM_PROGRAM_IDS[networkType];
-        const AMM_CONFIG_ID = AMM_CONFIG_IDS[networkType];
-
-        if (!RAYDIUM_CLMM_PROGRAM_ID) throw new Error(`Raydium CLMM program ID not defined for ${networkType}`);
-        if (!AMM_CONFIG_ID) throw new Error(`AMM Config ID not defined for ${networkType}`);
-
-        // Validate program IDs
-        console.log('\nValidating program IDs...');
-        const [raydiumInfo, token2022Info, tokenInfo, ammConfigInfo] = await Promise.all([
-            connection.getAccountInfo(RAYDIUM_CLMM_PROGRAM_ID),
-            connection.getAccountInfo(TOKEN_2022_PROGRAM_ID),
-            connection.getAccountInfo(TOKEN_PROGRAM_ID),
-            connection.getAccountInfo(AMM_CONFIG_ID)
-        ]);
         
-        console.log('Program ID validation results:');
-        console.log('Raydium CLMM Program:', raydiumInfo ? 'Found' : 'Not found');
-        console.log('Token-2022 Program:', token2022Info ? 'Found' : 'Not found');
-        console.log('Token Program:', tokenInfo ? 'Found' : 'Not found');
-        console.log('AMM Config:', ammConfigInfo ? 'Found' : 'Not found');
+        if (!heliusApiKey) {
+            console.warn('Warning: HELIUS_API_KEY not found in environment variables');
+        } else {
+            rpcEndpoint = rpcEndpoint.replace('${HELIUS_API_KEY}', heliusApiKey);
+        }
 
-        if (!raydiumInfo) throw new Error('Raydium CLMM program not found');
-        if (!token2022Info) throw new Error('Token-2022 program not found');
-        if (!tokenInfo) throw new Error('Token program not found');
-        if (!ammConfigInfo) throw new Error('AMM config not found');
+        // Initialize connection
+        connection = new Connection(rpcEndpoint, {
+            commitment: 'confirmed',
+            confirmTransactionInitialTimeout: CONFIRMATION_TIMEOUT * 1000
+        });
 
-        // Pool accounts
+        // Initialize Raydium SDK
+        const raydium = await Raydium.load({
+            connection,
+            owner: authority,
+        });
+
+        // Generate keypairs for pool accounts
         const poolKeypair = Keypair.generate();
-        const lpMintKeypair = Keypair.generate();
-        const baseTokenAccountKeypair = Keypair.generate();
-        const quoteTokenAccountKeypair = Keypair.generate();
-        const baseMint = new PublicKey('DVSSBXY2Kvpt7nmPRfbY9JNdgMnm8y6TvkkwoZiVQUiv'); // Regular SPL token
-        const quoteMint = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'); // USDC
+        const tokenVaultAKeypair = Keypair.generate();
+        const tokenVaultBKeypair = Keypair.generate();
+        const tokenMintLpKeypair = Keypair.generate();
+        const observationKeypair = Keypair.generate();
 
-        accountsToCleanup.push(poolKeypair, lpMintKeypair, baseTokenAccountKeypair, quoteTokenAccountKeypair);
-
-        console.log('Pool ID:', poolKeypair.publicKey.toString());
-
-        // Verify baseMint ownership
-        console.log('\nVerifying baseMint ownership...');
-        const baseMintInfo = await connection.getAccountInfo(baseMint);
-        if (!baseMintInfo) throw new Error('baseMint not found');
-        const baseMintProgram = baseMintInfo.owner.equals(TOKEN_2022_PROGRAM_ID) ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
-        console.log('baseMint owner:', baseMintInfo.owner.toString(), 'Using program:', baseMintProgram.toString());
-
-        // Rent exemptions
-        const POOL_STATE_SPACE = 648;
-        const poolRentExemption = await connection.getMinimumBalanceForRentExemption(POOL_STATE_SPACE);
-        const lpMintRentExemption = await connection.getMinimumBalanceForRentExemption(82);
-        const tokenAccountRentExemption = await connection.getMinimumBalanceForRentExemption(165);
-
-        // Check balance
-        const balance = await connection.getBalance(authority.publicKey);
-        const requiredSol = (poolRentExemption + lpMintRentExemption + 2 * tokenAccountRentExemption) / LAMPORTS_PER_SOL;
-        if (balance < requiredSol * LAMPORTS_PER_SOL) {
-            throw new Error(`Insufficient SOL: Need ${requiredSol} SOL, have ${balance / LAMPORTS_PER_SOL} SOL`);
-        }
-
-        // AMM authority PDA
-        const [ammAuthority] = await PublicKey.findProgramAddress(
-            [Buffer.from('pool_authority'), poolKeypair.publicKey.toBuffer()],
-            RAYDIUM_CLMM_PROGRAM_ID
-        );
-
-        // Create LP mint (standard SPL)
-        const createLpMintIx = SystemProgram.createAccount({
-            fromPubkey: authority.publicKey,
-            newAccountPubkey: lpMintKeypair.publicKey,
-            lamports: lpMintRentExemption,
-            space: 82,
-            programId: TOKEN_PROGRAM_ID,
-        });
-        const initLpMintIx = createInitializeMintInstruction(
-            lpMintKeypair.publicKey,
-            6,
-            authority.publicKey,
-            authority.publicKey,
-            TOKEN_PROGRAM_ID
-        );
-
-        // Create base token vault (dynamic based on baseMint)
-        const createBaseTokenIx = SystemProgram.createAccount({
-            fromPubkey: authority.publicKey,
-            newAccountPubkey: baseTokenAccountKeypair.publicKey,
-            lamports: tokenAccountRentExemption,
-            space: 165,
-            programId: baseMintProgram,
-        });
-        const initBaseTokenIx = createInitializeAccountInstruction(
-            baseTokenAccountKeypair.publicKey,
-            baseMint,
-            ammAuthority,
-            baseMintProgram
-        );
-
-        // Create quote token vault (standard SPL)
-        const createQuoteTokenIx = SystemProgram.createAccount({
-            fromPubkey: authority.publicKey,
-            newAccountPubkey: quoteTokenAccountKeypair.publicKey,
-            lamports: tokenAccountRentExemption,
-            space: 165,
-            programId: TOKEN_PROGRAM_ID,
-        });
-        const initQuoteTokenIx = createInitializeAccountInstruction(
-            quoteTokenAccountKeypair.publicKey,
-            quoteMint,
-            ammAuthority,
-            TOKEN_PROGRAM_ID
-        );
-
-        // Create pool state
-        const createPoolAccountIx = SystemProgram.createAccount({
-            fromPubkey: authority.publicKey,
-            newAccountPubkey: poolKeypair.publicKey,
-            lamports: poolRentExemption,
-            space: POOL_STATE_SPACE,
+        // Create pool parameters
+        const createPoolParams = {
             programId: RAYDIUM_CLMM_PROGRAM_ID,
-        });
-
-        // Initial price and tick spacing
-        const initialTick = 0;
-        const tickSpacing = 60;
-        if (initialTick < MIN_TICK || initialTick > MAX_TICK || tickSpacing < MIN_TICK_SPACING || tickSpacing > MAX_TICK_SPACING) {
-            throw new Error('Invalid tick or tickSpacing');
-        }
-
-        // Create pool instruction data
-        const instructionData = Buffer.alloc(CREATE_POOL_IX_DATA_LAYOUT.span + 8); // +8 for discriminator
-        CREATE_POOL_DISCRIMINATOR.copy(instructionData, 0);
-        CREATE_POOL_IX_DATA_LAYOUT.encode(
-            {
-                tick: initialTick,
-                tickSpacing: tickSpacing,
-            },
-            instructionData,
-            8  // Offset after discriminator
-        );
-
-        // Create the instruction
-        const createPoolInstruction = new TransactionInstruction({
-            programId: RAYDIUM_CLMM_PROGRAM_ID,
-            keys: [
-                { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },           // 0: Standard Token Program
-                { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },     // 1: Token-2022 Program
-                { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },   // 2: System Program
-                { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false },        // 3: Rent Sysvar
-                { pubkey: authority.publicKey, isSigner: true, isWritable: true },         // 4: Creator
-                { pubkey: poolKeypair.publicKey, isSigner: false, isWritable: true },      // 5: Pool state
-                { pubkey: ammAuthority, isSigner: false, isWritable: false },              // 6: Pool authority
-                { pubkey: lpMintKeypair.publicKey, isSigner: false, isWritable: true },    // 7: LP mint
-                { pubkey: baseMint, isSigner: false, isWritable: false },                  // 8: Base mint
-                { pubkey: quoteMint, isSigner: false, isWritable: false },                 // 9: Quote mint
-                { pubkey: baseTokenAccountKeypair.publicKey, isSigner: false, isWritable: true }, // 10: Base vault
-                { pubkey: quoteTokenAccountKeypair.publicKey, isSigner: false, isWritable: true }, // 11: Quote vault
-                { pubkey: AMM_CONFIG_ID, isSigner: false, isWritable: false },             // 12: AMM config
-            ],
-            data: instructionData,
-        });
-
-        // Debug logging before Transaction 1
-        console.log('\nPre-Transaction 1 Debug Info:');
-        console.log('LP Mint Program:', TOKEN_PROGRAM_ID.toString());
-        console.log('Base Token Program:', baseMintProgram.toString());
-        console.log('Quote Token Program:', TOKEN_PROGRAM_ID.toString());
-
-        // Transaction 1: Create accounts
-        console.log('\nSending Transaction 1: Creating accounts...');
-        const setupTx1 = new Transaction()
-            .add(createLpMintIx)
-            .add(initLpMintIx)
-            .add(createBaseTokenIx)
-            .add(initBaseTokenIx)
-            .add(createQuoteTokenIx)
-            .add(initQuoteTokenIx);
-        await checkTransactionSize(setupTx1, connection, authority.publicKey);
-        await sendAndConfirmTransactionWithRetry(
-            connection,
-            setupTx1,
-            [authority, lpMintKeypair, baseTokenAccountKeypair, quoteTokenAccountKeypair],
-            'Transaction 1'
-        );
-
-        // Verify accounts
-        console.log('\nVerifying accounts...');
-        const lpMintInfo = await connection.getAccountInfo(lpMintKeypair.publicKey);
-        if (!lpMintInfo || !lpMintInfo.owner.equals(TOKEN_PROGRAM_ID)) {
-            throw new Error('LP Mint verification failed');
-        }
-        const baseVaultInfo = await connection.getAccountInfo(baseTokenAccountKeypair.publicKey);
-        if (!baseVaultInfo || !baseVaultInfo.owner.equals(baseMintProgram)) {
-            throw new Error('Base Vault verification failed');
-        }
-        const quoteVaultInfo = await connection.getAccountInfo(quoteTokenAccountKeypair.publicKey);
-        if (!quoteVaultInfo || !quoteVaultInfo.owner.equals(TOKEN_PROGRAM_ID)) {
-            throw new Error('Quote Vault verification failed');
-        }
-
-        // Transaction 2: Create and initialize pool
-        console.log('\nPre-Transaction 2 Debug Info:');
-        console.log('Program ID:', RAYDIUM_CLMM_PROGRAM_ID.toString());
-        console.log('Instruction Data:', {
-            tick: initialTick,
-            tickSpacing: tickSpacing,
-        });
-        console.log('Data Buffer:', instructionData.toString('hex'));
-        console.log('\nAccount Keys:');
-        createPoolInstruction.keys.forEach((key, index) => {
-            console.log(`${index}: ${key.pubkey.toString()} (signer: ${key.isSigner}, writable: ${key.isWritable})`);
-        });
-
-        console.log('\nSending Transaction 2: Creating and initializing pool...');
-        const setupTx2 = new Transaction()
-            .add(createPoolAccountIx)
-            .add(createPoolInstruction);
-        await checkTransactionSize(setupTx2, connection, authority.publicKey);
-        await sendAndConfirmTransactionWithRetry(
-            connection,
-            setupTx2,
-            [authority, poolKeypair],
-            'Transaction 2'
-        );
-
-        // Update config
-        const configPath = path.join(__dirname, '../config.mainnet.json');
-        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-        config.raydiumClmm = {
-            poolId: poolKeypair.publicKey.toString(),
-            lpMint: lpMintKeypair.publicKey.toString(),
-            baseVault: baseTokenAccountKeypair.publicKey.toString(),
-            quoteVault: quoteTokenAccountKeypair.publicKey.toString(),
-            ammAuthority: ammAuthority.toString(),
+            ammConfig: AMM_CONFIG_ID,
+            poolCreator: authority.publicKey,
+            tokenA: baseMint,
+            tokenB: quoteMint,
             initialTick,
-            tickSpacing
+            tickSpacing,
+            startTime: Math.floor(Date.now() / 1000) + 60 * 60 * 24, // 24 hours from now
+            // Generated accounts
+            poolId: poolKeypair,
+            tokenVaultA: tokenVaultAKeypair,
+            tokenVaultB: tokenVaultBKeypair,
+            tokenMintLp: tokenMintLpKeypair,
+            observationId: observationKeypair,
         };
-        fs.writeFileSync(configPath, JSON.stringify(config, null, 4));
 
-        console.log('\nRaydium CLMM pool created successfully!');
-        console.log('Pool ID:', poolKeypair.publicKey.toString());
-        console.log('LP Mint:', lpMintKeypair.publicKey.toString());
-        console.log('Base Vault:', baseTokenAccountKeypair.publicKey.toString());
-        console.log('Quote Vault:', quoteTokenAccountKeypair.publicKey.toString());
-        console.log('AMM Authority:', ammAuthority.toString());
-        console.log('Initial Tick:', initialTick);
-        console.log('Tick Spacing:', tickSpacing);
-        console.log('\nNext steps:');
-        console.log('1. Run initialize_tick_arrays.js to set up tick arrays');
-        console.log('2. Run add_initial_liquidity.js to provide liquidity');
+        console.log('Creating pool with parameters:', {
+            ...createPoolParams,
+            poolId: createPoolParams.poolId.publicKey.toBase58(),
+            tokenVaultA: createPoolParams.tokenVaultA.publicKey.toBase58(),
+            tokenVaultB: createPoolParams.tokenVaultB.publicKey.toBase58(),
+            tokenMintLp: createPoolParams.tokenMintLp.publicKey.toBase58(),
+            observationId: createPoolParams.observationId.publicKey.toBase58(),
+        });
+
+        try {
+            // Create pool transaction
+            const { instructions, signers } = await raydium.clmm.makeCreatePoolInstructions({
+                poolInfo: createPoolParams,
+                makeTxVersion: 0,
+            });
+
+            // Create transaction and add compute budget
+            const transaction = new Transaction();
+            
+            // Add compute budget instruction
+            const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({
+                units: 1_400_000,
+            });
+            transaction.add(computeBudgetIx);
+            
+            // Add pool creation instructions
+            for (const ix of instructions) {
+                transaction.add(ix);
+            }
+
+            // Get recent blockhash
+            const { blockhash } = await connection.getLatestBlockhash();
+            transaction.recentBlockhash = blockhash;
+            transaction.feePayer = authority.publicKey;
+
+            // Sign transaction with all required signers
+            transaction.sign(authority, ...signers);
+
+            console.log('Sending transaction...');
+            const txid = await connection.sendRawTransaction(transaction.serialize());
+            
+            console.log('Pool created successfully! Transaction ID:', txid);
+
+            // Update config
+            const configPath = path.join(__dirname, '../config.mainnet.json');
+            const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+            config.raydiumClmm = {
+                poolId: poolKeypair.publicKey.toString(),
+                lpMint: tokenMintLpKeypair.publicKey.toString(),
+                baseVault: tokenVaultAKeypair.publicKey.toString(),
+                quoteVault: tokenVaultBKeypair.publicKey.toString(),
+                ammAuthority: AMM_CONFIG_ID.toString(),
+                observationId: observationKeypair.publicKey.toString(),
+                initialTick,
+                tickSpacing
+            };
+            fs.writeFileSync(configPath, JSON.stringify(config, null, 4));
+
+            console.log('\nNext steps:');
+            console.log('1. Run initialize_tick_arrays.js to set up tick arrays');
+            console.log('2. Run add_initial_liquidity.js to provide liquidity');
+
+        } catch (error) {
+            console.error('Error creating Raydium CLMM pool:', error);
+            if (connection && authority) {
+                await cleanupAccounts(connection, authority, accountsToCleanup);
+            }
+            process.exit(1);
+        }
 
     } catch (error) {
         console.error('\nError creating Raydium CLMM pool:', error);
@@ -507,4 +339,4 @@ async function createRaydiumClmmPool() {
     }
 }
 
-createRaydiumClmmPool(); 
+main(); 

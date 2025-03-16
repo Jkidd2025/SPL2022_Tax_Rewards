@@ -6,7 +6,7 @@ async function main() {
     try {
         // Load configuration
         const config = JSON.parse(fs.readFileSync('./config.mainnet.json', 'utf-8'));
-        
+
         // Connect to mainnet
         const connection = new Connection(process.env.SOLANA_RPC_ENDPOINT || 'https://api.mainnet-beta.solana.com', {
             commitment: 'confirmed',
@@ -15,10 +15,10 @@ async function main() {
 
         // Get token mint
         const mintPubkey = new PublicKey(config.tokens.base.mint);
-        
+
         console.log('\nFetching token metadata...');
         console.log('Token Mint:', mintPubkey.toString());
-        
+
         // Get metadata PDA
         const [metadataPDA] = PublicKey.findProgramAddressSync(
             [
@@ -31,7 +31,7 @@ async function main() {
 
         // Fetch metadata account
         const metadataAccount = await Metadata.fromAccountAddress(connection, metadataPDA);
-        
+
         console.log('\nToken Metadata:');
         console.log('Name:', metadataAccount.data.name);
         console.log('Symbol:', metadataAccount.data.symbol);
@@ -39,7 +39,7 @@ async function main() {
         console.log('Seller Fee Basis Points:', metadataAccount.data.sellerFeeBasisPoints);
         console.log('Is Mutable:', metadataAccount.isMutable);
         console.log('Update Authority:', metadataAccount.updateAuthority.toString());
-        
+
         // Try to fetch and display the JSON metadata from URI
         try {
             console.log('\nFetching metadata JSON from URI...');
@@ -54,7 +54,7 @@ async function main() {
         } catch (error) {
             console.log('Error fetching metadata JSON:', error.message);
         }
-        
+
     } catch (error) {
         console.error('\nError checking metadata:', error);
         process.exit(1);

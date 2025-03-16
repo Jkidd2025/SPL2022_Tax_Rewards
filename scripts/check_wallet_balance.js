@@ -6,7 +6,7 @@ async function checkTokenAuthorityBalance() {
     try {
         // Load wallet
         const walletPath = 'wallets/mainnet/token-authority.json';
-        
+
         if (!fs.existsSync(walletPath)) {
             console.error(`\n❌ Wallet file not found at: ${walletPath}`);
             process.exit(1);
